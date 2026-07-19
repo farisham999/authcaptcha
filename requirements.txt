@@ -2,5 +2,3 @@ flask
 requests
 beautifulsoup4
 urllib3
-playwright
-google-genai
