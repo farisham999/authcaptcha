@@ -125,8 +125,15 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=IsolateOrigins,site-per-process"
             ]
+            
+            # FIX FORMAT PROXY UNTUK PLAYWRIGHT
+            pw_proxy = None
             if proxy_url:
-                browser_args.append(f"--proxy-server={proxy_url}")
+                if not proxy_url.startswith('http://') and not proxy_url.startswith('https://') and not proxy_url.startswith('socks5://'):
+                    pw_proxy = f"http://{proxy_url}"
+                else:
+                    pw_proxy = proxy_url
+                browser_args.append(f"--proxy-server={pw_proxy}")
                 
             browser = p.chromium.launch(headless=True, args=browser_args)
             context = browser.new_context(
@@ -182,7 +189,6 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 browser.close()
                 
     except Exception as e:
-        # INI PENTING: Kalau Playwright tak install betul, dia akan print error sini
         logging.error(f"{Colors.FAIL}[-] Playwright Crash Error: {str(e)}{Colors.ENDC}")
         return None, None
 
