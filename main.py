@@ -5,14 +5,13 @@ import requests
 import logging
 import re
 import time
-import json
 import os
 import string
 import ssl
 import urllib3
 from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin, urlparse
 
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -20,15 +19,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 
 class Colors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
     OKGREEN = '\033[92m'
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', datefmt='%H:%M:%S')
 
@@ -120,7 +115,6 @@ def solve_capsolver(sitekey, url):
         
     logging.info(f"{Colors.WARNING}[!] reCAPTCHA detected. Sending to CapSolver...{Colors.ENDC}")
     
-    # Submit task
     submit_url = "https://api.capsolver.com/createTask"
     data = {
         "clientKey": api_key,
@@ -138,11 +132,10 @@ def solve_capsolver(sitekey, url):
             return None
             
         task_id = resp.get('taskId')
-        logging.info(f"{Colors.OKBLUE}[*] CapSolver Task ID: {task_id}. Waiting...{Colors.ENDC}")
+        logging.info(f"{Colors.OKCYAN}[*] CapSolver Task ID: {task_id}. Waiting...{Colors.ENDC}")
         
-        # Polling for result (Tunggu CapSolver solve)
         result_url = "https://api.capsolver.com/getTaskResult"
-        for _ in range(20):  # Max 100 seconds
+        for _ in range(20):
             time.sleep(5)
             res = requests.post(result_url, json={"clientKey": api_key, "taskId": task_id}).json()
             if res.get('status') == 'ready':
@@ -350,7 +343,7 @@ def extract_confirmation_form(html, soup):
         form_id = confirm_form.get('id', '')
         form_class = confirm_form.get('class', [])
         form_action = confirm_form.get('action', '')
-        if 'search' in str(form_id).lower() or any('search' ini str(c).lower() for c in form_class) or 'search' in str(form_action).lower():
+        if 'search' in str(form_id).lower() or any('search' in str(c).lower() for c in form_class) or 'search' in str(form_action).lower():
             confirm_form = None
 
     if not confirm_form:
