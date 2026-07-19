@@ -114,7 +114,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI GEMINI PRO TEBAK GAMBAR
+# FUNGSI GEMINI TEBAK GAMBAR
 # ==========================================
 def ask_gemini_for_boxes(image_bytes):
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -123,12 +123,12 @@ def ask_gemini_for_boxes(image_bytes):
         return []
         
     try:
-        logging.info(f"{Colors.OKCYAN}[*] Asking Gemini 1.5 Pro to solve image...{Colors.ENDC}")
+        logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
         
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        # TUKAR KEPADA MODEL PRO YANG LEBIH BIJAK
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
+        # GUNA MODEL FLASH YANG CONFIRM ADA
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
         headers = {
             "Content-Type": "application/json",
             "X-goog-api-key": api_key
@@ -153,7 +153,7 @@ def ask_gemini_for_boxes(image_bytes):
             text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
             numbers = re.findall(r'\d+', text)
             boxes = [int(n) for n in numbers if 1 <= int(n) <= 9]
-            logging.info(f"{Colors.OKGREEN}[+] Gemini Pro replied: Click boxes {boxes}{Colors.ENDC}")
+            logging.info(f"{Colors.OKGREEN}[+] Gemini replied: Click boxes {boxes}{Colors.ENDC}")
             return boxes
         else:
             logging.error(f"{Colors.FAIL}[-] Gemini HTTP Error {resp.status_code}: {resp.text}{Colors.ENDC}")
@@ -166,7 +166,7 @@ def ask_gemini_for_boxes(image_bytes):
 # BYPASS CLOUDFLARE & CAPTCHA (3 KALI CUBA)
 # ==========================================
 def bypass_cloudflare_and_captcha(url, proxy_url=None):
-    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini 1.5 Pro)...{Colors.ENDC}")
+    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini AI)...{Colors.ENDC}")
     try:
         with sync_playwright() as p:
             browser_args = [
@@ -256,7 +256,7 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                         # Check if we got the token
                         token = page.evaluate("document.getElementById('g-recaptcha-response').value")
                         if token:
-                            logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed by Gemini Pro on attempt {attempt}!{Colors.ENDC}")
+                            logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed by Gemini on attempt {attempt}!{Colors.ENDC}")
                             return page.content(), token
                         else:
                             logging.error(f"{Colors.FAIL}[-] Attempt {attempt} failed. Trying next image...{Colors.ENDC}")
