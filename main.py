@@ -13,12 +13,22 @@ import urllib3
 from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
+import base64
 
-# --- IMPORT UNTUK BYPASS CLOUDFLARE & CAPTCHA ---
+# --- IMPORT UNTUK BYPASS CLOUDFLARE & GEMINI AI ---
 from playwright.sync_api import sync_playwright
+import google.generativeai as genai
 
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Setup Gemini AI
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    vision_model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    vision_model = None
 
 app = Flask(__name__)
 
@@ -113,27 +123,53 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# BYPASS CLOUDFLARE STRICT & CAPTCHA
+# FUNGSI GEMINI TEBAK GAMBAR
+# ==========================================
+def ask_gemini_for_boxes(image_b64):
+    if not vision_model:
+        logging.error(f"{Colors.FAIL}[-] GEMINI_API_KEY not set!{Colors.ENDC}")
+        return []
+        
+    try:
+        logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
+        prompt = "This is a Google reCAPTCHA image challenge. There is a 3x3 grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
+        
+        img_data = base64.b64decode(image_b64)
+        img_part = {"mime_type": "image/jpeg", "data": img_data}
+        
+        response = vision_model.generate_content([prompt, img_part])
+        text = response.text.strip()
+        
+        # Extract numbers from response
+        numbers = re.findall(r'\d+', text)
+        boxes = [int(n) for n in numbers if 1 <= int(n) <= 9]
+        logging.info(f"{Colors.OKGREEN}[+] Gemini replied: Click boxes {boxes}{Colors.ENDC}")
+        return boxes
+    except Exception as e:
+        logging.error(f"{Colors.FAIL}[-] Gemini Error: {str(e)}{Colors.ENDC}")
+        return []
+
+# ==========================================
+# BYPASS CLOUDFLARE & CAPTCHA GUNA GEMINI
 # ==========================================
 def bypass_cloudflare_and_captcha(url, proxy_url=None):
-    logging.info(f"{Colors.WARNING}[!] Bypassing Strict Cloudflare & Captcha...{Colors.ENDC}")
+    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini AI)...{Colors.ENDC}")
     try:
         with sync_playwright() as p:
             browser_args = [
                 "--no-sandbox", 
                 "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process"
+                "--disable-blink-features=AutomationControlled"
             ]
-            
-            # Kita buang proxy dari Playwright supaya dia guna IP Railway (lebih stabil utk Cloudflare)
-            
+            if proxy_url:
+                pw_proxy = proxy_url
+                if not pw_proxy.startswith('http'): pw_proxy = f"http://{pw_proxy}"
+                browser_args.append(f"--proxy-server={pw_proxy}")
+                
             browser = p.chromium.launch(headless=True, args=browser_args)
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-                timezone_id="America/New_York"
+                viewport={"width": 1920, "height": 1080}
             )
             
             context.add_init_script("""
@@ -149,40 +185,77 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 logging.info(f"{Colors.OKCYAN}[*] Opening browser...{Colors.ENDC}")
                 page.goto(url, timeout=45000, wait_until="domcontentloaded")
                 
-                # Buat pergerakan mouse palsu
                 try:
                     page.mouse.move(100, 100)
                     page.mouse.move(200, 200)
-                    time.sleep(2)
-                except:
-                    pass
+                except: pass
                 
-                try:
-                    page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
-                    logging.info(f"{Colors.OKCYAN}[*] reCAPTCHA found. Clicking...{Colors.ENDC}")
-                    frame = page.frame_locator("iframe[title='reCAPTCHA']")
-                    frame.locator("#recaptcha-anchor").click()
-                    time.sleep(4)
-                    token = page.evaluate("document.getElementById('g-recaptcha-response').value")
+                logging.info(f"{Colors.OKCYAN}[*] Waiting for reCAPTCHA...{Colors.ENDC}")
+                page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
+                
+                frame = page.frame_locator("iframe[title='reCAPTCHA']")
+                frame.locator("#recaptcha-anchor").click()
+                time.sleep(3)
+                
+                # Check if token is already there (auto pass)
+                token = page.evaluate("document.getElementById('g-recaptcha-response').value")
+                if token:
+                    logging.info(f"{Colors.OKGREEN}[+] Auto-passed reCAPTCHA!{Colors.ENDC}")
+                    return page.content(), token
+                
+                # If no token, means Image Challenge appeared
+                logging.info(f"{Colors.WARNING}[!] Image Challenge detected. Getting screenshot...{Colors.ENDC}")
+                challenge_frame = page.frame_locator("iframe[title='recaptcha challenge expires in two minutes']")
+                
+                # Wait for the image to load
+                challenge_frame.locator(".rc-imageselect-table-33").wait_for(timeout=10000)
+                time.sleep(2) # Give it a moment to fully render
+                
+                # Screenshot the challenge image
+                image_element = challenge_frame.locator("#rc-imageselect-target")
+                image_b64 = image_element.screenshot()
+                
+                # Convert bytes to base64 string
+                image_b64_str = base64.b64encode(image_b64).decode('utf-8')
+                
+                # Ask Gemini
+                boxes_to_click = ask_gemini_for_boxes(image_b64_str)
+                
+                if boxes_to_click:
+                    # Click the boxes (3x3 grid)
+                    for box_num in boxes_to_click:
+                        # Calculate row and col (1-3)
+                        row = (box_num - 1) // 3 + 1
+                        col = (box_num - 1) % 3 + 1
+                        selector = f"td:nth-child({col})"
+                        if row > 1:
+                            selector = f"tr:nth-child({row}) td:nth-child({col})"
+                        
+                        try:
+                            challenge_frame.locator(f"#rc-imageselect-target {selector}").click()
+                            time.sleep(0.5)
+                        except Exception as e:
+                            logging.error(f"Failed to click box {box_num}: {str(e)}")
                     
+                    time.sleep(1)
+                    # Click Verify button
+                    challenge_frame.locator("#recaptcha-verify-button").click()
+                    time.sleep(4)
+                    
+                    # Check if we got the token
+                    token = page.evaluate("document.getElementById('g-recaptcha-response').value")
                     if token:
-                        logging.info(f"{Colors.OKGREEN}[+] Captcha Bypassed!{Colors.ENDC}")
+                        logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed by Gemini!{Colors.ENDC}")
                         return page.content(), token
                     else:
-                        logging.error(f"{Colors.FAIL}[-] reCAPTCHA required image challenge.{Colors.ENDC}")
+                        logging.error(f"{Colors.FAIL}[-] Gemini failed to solve. Maybe wrong guess.{Colors.ENDC}")
                         return None, None
-                        
-                except Exception as e:
-                    page_content = page.content()
-                    if "crm-container" in page_content or "contribute" in page_content:
-                        logging.info(f"{Colors.OKGREEN}[+] Page loaded without Captcha.{Colors.ENDC}")
-                        return page_content, "no_captcha"
-                    else:
-                        logging.error(f"{Colors.FAIL}[-] Cloudflare blocked or no form found: {str(e)}{Colors.ENDC}")
-                        return None, None
+                else:
+                    logging.error(f"{Colors.FAIL}[-] Gemini couldn't determine boxes.{Colors.ENDC}")
+                    return None, None
                     
             except Exception as e:
-                logging.error(f"{Colors.FAIL}[-] Failed to load page (Timeout/Proxy): {str(e)}{Colors.ENDC}")
+                logging.error(f"{Colors.FAIL}[-] Error during bypass: {str(e)}{Colors.ENDC}")
                 return None, None
             finally:
                 browser.close()
@@ -190,6 +263,7 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
     except Exception as e:
         logging.error(f"{Colors.FAIL}[-] Playwright Crash Error: {str(e)}{Colors.ENDC}")
         return None, None
+
 # ==========================================
 
 def detect_payment_processor(html):
