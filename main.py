@@ -127,7 +127,6 @@ def ask_gemini_for_boxes(image_bytes):
         
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        # GUNA MODEL FLASH YANG CONFIRM ADA
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
         headers = {
             "Content-Type": "application/json",
