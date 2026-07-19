@@ -18,6 +18,7 @@ import base64
 # --- IMPORT UNTUK BYPASS CLOUDFLARE & GEMINI AI ---
 from playwright.sync_api import sync_playwright
 from google import genai
+from google.genai import types
 
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -122,7 +123,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI GEMINI TEBAK GAMBAR (Pakej Baru)
+# FUNGSI GEMINI TEBAK GAMBAR (Fix Validation)
 # ==========================================
 def ask_gemini_for_boxes(image_bytes):
     if not client:
@@ -133,10 +134,12 @@ def ask_gemini_for_boxes(image_bytes):
         logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
         prompt = "This is a Google reCAPTCHA image challenge. There is a grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
         
-        # Guna format baru google-genai
+        # Guna types.Part yang betul
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+        
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=[prompt, {"mime_type": "image/jpeg", "data": image_bytes}]
+            contents=[prompt, image_part]
         )
         text = response.text.strip()
         
@@ -207,7 +210,7 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 logging.info(f"{Colors.WARNING}[!] Image Challenge detected. Getting screenshot...{Colors.ENDC}")
                 challenge_frame = page.frame_locator("iframe[title='recaptcha challenge expires in two minutes']")
                 
-                # Tunggu gambarutama load (kita guna #rc-imageselect-target)
+                # Tunggu gambar utama load
                 challenge_frame.locator("#rc-imageselect-target").wait_for(timeout=15000)
                 time.sleep(2) # Give it a moment to fully render
                 
