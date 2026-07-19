@@ -162,7 +162,7 @@ def ask_gemini_for_boxes(image_bytes):
         return []
 
 # ==========================================
-# BYPASS CLOUDFLARE & CAPTCHA (3 KALI CUBA)
+# BYPASS CLOUDFLARE & CAPTCHA (3 KALI CUBA + WAIT IMAGE LOAD)
 # ==========================================
 def bypass_cloudflare_and_captcha(url, proxy_url=None):
     logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini AI)...{Colors.ENDC}")
@@ -223,8 +223,15 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 
                 # ---- LOOP 3 KALI CUBA ----
                 for attempt in range(1, 4):
-                    logging.info(f"{Colors.OKCYAN}[*] Attempt {attempt}/3... Getting screenshot...{Colors.ENDC}")
-                    time.sleep(2) # Give it a moment to fully render
+                    logging.info(f"{Colors.OKCYAN}[*] Attempt {attempt}/3... Waiting for image to load...{Colors.ENDC}")
+                    
+                    # TUNGGU GAMBAR BENAR-BENAR HABIS LOAD
+                    try:
+                        challenge_frame.locator("#rc-imageselect-target img").wait_for(timeout=15000)
+                        # Tunggu sikit lepas img load utk elakkan lag
+                        time.sleep(2)
+                    except:
+                        time.sleep(3)
                     
                     # Screenshot the challenge image
                     image_element = challenge_frame.locator("#rc-imageselect-target")
