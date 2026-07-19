@@ -110,52 +110,52 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI CAPMONSTER SOLVER
+# FUNGSI CAPSOLVER SOLVER
 # ==========================================
-def solve_capmonster(sitekey, url):
-    api_key = os.environ.get("CAPMONSTER_API_KEY")
+def solve_capsolver(sitekey, url):
+    api_key = os.environ.get("CAPSOLVER_API_KEY")
     if not api_key:
-        logging.error(f"{Colors.FAIL}[-] CAPMONSTER_API_KEY not set!{Colors.ENDC}")
+        logging.error(f"{Colors.FAIL}[-] CAPSOLVER_API_KEY not set!{Colors.ENDC}")
         return None
         
-    logging.info(f"{Colors.WARNING}[!] reCAPTCHA detected. Sending to CapMonster...{Colors.ENDC}")
+    logging.info(f"{Colors.WARNING}[!] reCAPTCHA detected. Sending to CapSolver...{Colors.ENDC}")
     
     # Submit task
-    submit_url = "https://api.capmonster.cloud/createTask"
+    submit_url = "https://api.capsolver.com/createTask"
     data = {
         "clientKey": api_key,
         "task": {
-            "type": "NoCaptchaTaskProxyless",
+            "type": "ReCaptchaV2TaskProxyless",
             "websiteURL": url,
             "websiteKey": sitekey
         }
     }
     
     try:
-        resp = requests.post(submit_url, json=data).json()
+        resp = requests.post(submit_url, json=data, timeout=20).json()
         if resp.get('errorId') != 0:
-            logging.error(f"{Colors.FAIL}CapMonster Error: {resp.get('errorDescription')}{Colors.ENDC}")
+            logging.error(f"{Colors.FAIL}CapSolver Error: {resp.get('errorDescription')}{Colors.ENDC}")
             return None
             
         task_id = resp.get('taskId')
-        logging.info(f"{Colors.OKBLUE}[*] CapMonster Task ID: {task_id}. Waiting...{Colors.ENDC}")
+        logging.info(f"{Colors.OKBLUE}[*] CapSolver Task ID: {task_id}. Waiting...{Colors.ENDC}")
         
-        # Polling for result (Tunggu CapMonster solve)
-        result_url = "https://api.capmonster.cloud/getTaskResult"
+        # Polling for result (Tunggu CapSolver solve)
+        result_url = "https://api.capsolver.com/getTaskResult"
         for _ in range(20):  # Max 100 seconds
             time.sleep(5)
             res = requests.post(result_url, json={"clientKey": api_key, "taskId": task_id}).json()
             if res.get('status') == 'ready':
                 token = res['solution']['gRecaptchaResponse']
-                logging.info(f"{Colors.OKGREEN}[+] CapMonster Solved!{Colors.ENDC}")
+                logging.info(f"{Colors.OKGREEN}[+] CapSolver Solved!{Colors.ENDC}")
                 return token
             elif res.get('errorId') != 0:
-                logging.error(f"{Colors.FAIL}CapMonster Failed: {res.get('errorDescription')}{Colors.ENDC}")
+                logging.error(f"{Colors.FAIL}CapSolver Failed: {res.get('errorDescription')}{Colors.ENDC}")
                 return None
                 
         return None
     except Exception as e:
-        logging.error(f"{Colors.FAIL}CapMonster Exception: {str(e)}{Colors.ENDC}")
+        logging.error(f"{Colors.FAIL}CapSolver Exception: {str(e)}{Colors.ENDC}")
         return None
 
 def detect_payment_processor(html):
@@ -240,7 +240,7 @@ def get_form_action_and_payload(session, url, proxy_url):
         
         html = resp.text
         
-        # --- BYPASS CAPTCHA GUNA CAPMONSTER ---
+        # --- BYPASS CAPTCHA GUNA CAPSOLVER ---
         site_key = None
         captcha_match = re.search(r'<div[^>]*class="[^"]*g-recaptcha"[^>]*data-sitekey="([^"]+)"', html, re.I)
         if not captcha_match:
@@ -248,7 +248,7 @@ def get_form_action_and_payload(session, url, proxy_url):
             
         if captcha_match:
             site_key = captcha_match.group(1)
-            captcha_token = solve_capmonster(site_key, url)
+            captcha_token = solve_capsolver(site_key, url)
             if not captcha_token:
                 return None, None, None, None, "Failed to solve Captcha"
         # -------------------------------------
@@ -350,7 +350,7 @@ def extract_confirmation_form(html, soup):
         form_id = confirm_form.get('id', '')
         form_class = confirm_form.get('class', [])
         form_action = confirm_form.get('action', '')
-        if 'search' in str(form_id).lower() or any('search' in str(c).lower() for c in form_class) or 'search' in str(form_action).lower():
+        if 'search' in str(form_id).lower() or any('search' ini str(c).lower() for c in form_class) or 'search' in str(form_action).lower():
             confirm_form = None
 
     if not confirm_form:
