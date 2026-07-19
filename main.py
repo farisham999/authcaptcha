@@ -125,10 +125,9 @@ def ask_gemini_for_boxes(image_bytes):
     try:
         logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
         
-        # Encode bytes ke base64
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
         headers = {
             "Content-Type": "application/json",
             "X-goog-api-key": api_key
