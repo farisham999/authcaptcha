@@ -14,11 +14,8 @@ from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
 
-# --- IMPORT UNTUK BYPASS CAPTCHA ---
+# --- IMPORT UNTUK BYPASS CLOUDFLARE & CAPTCHA ---
 from playwright.sync_api import sync_playwright
-import io
-import speech_recognition as sr
-import pydub
 
 # FIX RAILWAY CLOUDFLARE BLOCK
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
@@ -117,88 +114,60 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# CLAS UNTUK BYPASS RECAPTCHA (sarperavci)
+# BYPASS CLOUDFLARE & CAPTCHA GUNA PLAYWRIGHT
 # ==========================================
-class GoogleRecaptchaBypass:
-    def __init__(self, url: str, proxy: str = None):
-        self.url = url
-        self.proxy = proxy
-
-    def audio_transcribe(self, audio_url: str) -> str:
-        resp = requests.get(audio_url, stream=True)
-        audio_data = io.BytesIO(resp.content)
-        audio_data.seek(0)
-        
-        # Tukar mp3 ke wav
-        audio = pydub.AudioSegment.from_file(audio_data, format="mp3")
-        wav_data = io.BytesIO()
-        audio.export(wav_data, format="wav")
-        wav_data.seek(0)
-        
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(wav_data) as source:
-            audio_data = recognizer.record(source)
-        
-        # Guna Google free speech to text
-        text = recognizer.recognize_google(audio_data)
-        return text
-
-    def solve(self) -> str:
-        with sync_playwright() as p:
-            # Kita guna mode stealth supaya Cloudflare tak block
-            browser_args = [
-                "--no-sandbox", 
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled" # Penting untuk bypass cloudflare
-            ]
-            if self.proxy:
-                browser_args.append(f"--proxy-server={self.proxy}")
-                
-            browser = p.chromium.launch(headless=True, args=browser_args)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080}
-            )
-            page = context.new_page()
+def bypass_cloudflare_and_captcha(url, proxy_url=None):
+    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha...{Colors.ENDC}")
+    with sync_playwright() as p:
+        browser_args = [
+            "--no-sandbox", 
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled"
+        ]
+        if proxy_url:
+            browser_args.append(f"--proxy-server={proxy_url}")
             
+        browser = p.chromium.launch(headless=True, args=browser_args)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080}
+        )
+        page = context.new_page()
+        
+        try:
+            page.goto(url, timeout=45000, wait_until="networkidle")
+            
+            # Tunggu kotak reCAPTCHA keluar (max 15 saat)
             try:
-                page.goto(self.url, timeout=30000, wait_until="networkidle")
+                page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
+                logging.info(f"{Colors.OKCYAN}[*] reCAPTCHA found. Clicking...{Colors.ENDC}")
                 
-                # Click reCAPTCHA iframe checkbox
+                # Click kotak I'm not a robot
                 frame = page.frame_locator("iframe[title='reCAPTCHA']")
                 frame.locator("#recaptcha-anchor").click()
                 
-                time.sleep(2)
-                
-                # Klik Audio Button
-                frame2 = page.frame_locator("iframe[title='recaptcha challenge expires in two minutes']")
-                frame2.locator("#recaptcha-audio-button").click()
-                
-                time.sleep(2)
-                
-                # Dapatkan link audio
-                audio_src = frame2.locator("#audio-source").get_attribute("src")
-                if not audio_src:
-                    return None
-                
-                # Transcribe audio guna AI percuma
-                text = self.audio_transcribe(audio_src)
-                
-                # Masukkan jawapan
-                frame2.locator("#audio-response").fill(text)
-                frame2.locator("#recaptcha-verify-button").click()
-                
                 time.sleep(3)
                 
-                # Dapatkan token
+                # Check kalau dia bagi challenge (gambar) atau terus lulus
+                # Kebiasaannya kalau guna browser betul-betul, dia terus lulus
                 token = page.evaluate("document.getElementById('g-recaptcha-response').value")
-                return token
                 
+                if token:
+                    logging.info(f"{Colors.OKGREEN}[+] Captcha Bypassed!{Colors.ENDC}")
+                    html_content = page.content()
+                    return html_content, token
+                else:
+                    return None, None
+                    
             except Exception as e:
-                logging.error(f"{Colors.FAIL}Playwright Solver Error: {str(e)}{Colors.ENDC}")
-                return None
-            finally:
-                browser.close()
+                logging.error(f"{Colors.FAIL}Captcha frame error: {str(e)}{Colors.ENDC}")
+                return None, None
+                
+        except Exception as e:
+            logging.error(f"{Colors.FAIL}Cloudflare block or timeout: {str(e)}{Colors.ENDC}")
+            return None, None
+        finally:
+            browser.close()
 
 # ==========================================
 
@@ -276,30 +245,13 @@ def extract_raw_fields(html, soup, form):
     return payload
 
 def get_form_action_and_payload(session, url, proxy_url):
+    # Kita buang session.get() sebab Playwright dah buka semuanya
     try:
-        resp = session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=True)
-        if resp.status_code == 403: return None, None, None, None, "403 Forbidden"
-        if resp.status_code in [403, 503] and re.search(r'cloudflare|cf-challenge', resp.text, re.I): return None, None, None, None, "Cloudflare protection"
-        if resp.status_code != 200 or not resp.text: return None, None, None, None, f"Bad HTTP {resp.status_code}"
+        html, captcha_token = bypass_cloudflare_and_captcha(url, proxy_url)
         
-        html = resp.text
-        
-        # --- BYPASS CAPTCHA GUNA AUDIO AI ---
-        if re.search(r'<div[^>]*class="[^"]*g-recaptcha"', html, re.I):
-            logging.info(f"{Colors.WARNING}[!] reCAPTCHA detected. Starting Google Audio Bypass...{Colors.ENDC}")
-            try:
-                bypass = GoogleRecaptchaBypass(url, proxy_url)
-                captcha_token = bypass.solve()
-                
-                if captcha_token:
-                    logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed Successfully!{Colors.ENDC}")
-                else:
-                    return None, None, None, None, "Failed to bypass Captcha"
-            except Exception as e:
-                logging.error(f"{Colors.FAIL}Captcha bypass exception: {str(e)}{Colors.ENDC}")
-                return None, None, None, None, "Captcha Bypass Error"
-        # -------------------------------------
-        
+        if not html:
+            return None, None, None, None, "Cloudflare or Captcha Failed"
+            
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
         if 'stripe' in processors: return None, None, None, None, "Stripe Detected"
@@ -320,7 +272,6 @@ def get_form_action_and_payload(session, url, proxy_url):
         
         payload = extract_raw_fields(html, soup, form)
         
-        # Masukkan token yang dah di-bypass
         if captcha_token:
             payload['g-recaptcha-response'] = {'value': captcha_token, 'type': 'text', 'required': True}
             payload['g_recaptcha_response'] = {'value': captcha_token, 'type': 'text', 'required': True}
