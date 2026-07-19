@@ -117,89 +117,74 @@ def create_session(proxy_url=None):
 # ==========================================
 def bypass_cloudflare_and_captcha(url, proxy_url=None):
     logging.info(f"{Colors.WARNING}[!] Bypassing Strict Cloudflare & Captcha...{Colors.ENDC}")
-    with sync_playwright() as p:
-        browser_args = [
-            "--no-sandbox", 
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process"
-        ]
-        if proxy_url:
-            browser_args.append(f"--proxy-server={proxy_url}")
+    try:
+        with sync_playwright() as p:
+            browser_args = [
+                "--no-sandbox", 
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process"
+            ]
+            if proxy_url:
+                browser_args.append(f"--proxy-server={proxy_url}")
+                
+            browser = p.chromium.launch(headless=True, args=browser_args)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="America/New_York"
+            )
             
-        browser = p.chromium.launch(headless=True, args=browser_args)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US",
-            timezone_id="America/New_York"
-        )
-        
-        # Inject script anti-detect sebelum page load
-        context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get() { return false; }});
-            Object.defineProperty(navigator, 'plugins', {get() { return [1, 2, 3, 4, 5]; }});
-            Object.defineProperty(navigator, 'languages', {get() { return ['en-US', 'en']; }});
-            window.chrome = { runtime: {} };
-        """)
-        
-        page = context.new_page()
-        
-        try:
-            page.goto(url, timeout=45000, wait_until="domcontentloaded")
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get() { return false; }});
+                Object.defineProperty(navigator, 'plugins', {get() { return [1, 2, 3, 4, 5]; }});
+                Object.defineProperty(navigator, 'languages', {get() { return ['en-US', 'en']; }});
+                window.chrome = { runtime: {} };
+            """)
             
-            # Buat pergerakan mouse palsu (Cloudflare check benda ni)
+            page = context.new_page()
+            
             try:
+                page.goto(url, timeout=45000, wait_until="domcontentloaded")
                 page.mouse.move(100, 100)
                 page.mouse.move(200, 200)
-                page.mouse.move(150, 50)
                 time.sleep(2)
-            except:
-                pass
                 
-            logging.info(f"{Colors.OKCYAN}[*] Waiting for page elements...{Colors.ENDC}")
-            
-            # Tunggu kotak reCAPTCHA keluar (max 15 saat)
-            try:
-                page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
-                logging.info(f"{Colors.OKCYAN}[*] reCAPTCHA found. Clicking...{Colors.ENDC}")
-                
-                # Click kotak I'm not a robot
-                frame = page.frame_locator("iframe[title='reCAPTCHA']")
-                frame.locator("#recaptcha-anchor").click()
-                
-                time.sleep(4) # Tunggu dia verify
-                
-                # Check kalau dia bagi challenge (gambar) atau terus lulus
-                token = page.evaluate("document.getElementById('g-recaptcha-response').value")
-                
-                if token:
-                    logging.info(f"{Colors.OKGREEN}[+] Captcha Bypassed!{Colors.ENDC}")
-                    html_content = page.content()
-                    return html_content, token
-                else:
-                    logging.error(f"{Colors.FAIL}[-] reCAPTCHA required image challenge. Cannot bypass.{Colors.ENDC}")
-                    return None, None
+                try:
+                    page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
+                    logging.info(f"{Colors.OKCYAN}[*] reCAPTCHA found. Clicking...{Colors.ENDC}")
+                    frame = page.frame_locator("iframe[title='reCAPTCHA']")
+                    frame.locator("#recaptcha-anchor").click()
+                    time.sleep(4)
+                    token = page.evaluate("document.getElementById('g-recaptcha-response').value")
+                    
+                    if token:
+                        logging.info(f"{Colors.OKGREEN}[+] Captcha Bypassed!{Colors.ENDC}")
+                        return page.content(), token
+                    else:
+                        logging.error(f"{Colors.FAIL}[-] reCAPTCHA required image challenge.{Colors.ENDC}")
+                        return None, None
+                        
+                except Exception as e:
+                    page_content = page.content()
+                    if "crm-container" in page_content or "contribute" in page_content:
+                        logging.info(f"{Colors.OKGREEN}[+] Page loaded without Captcha.{Colors.ENDC}")
+                        return page_content, "no_captcha"
+                    else:
+                        logging.error(f"{Colors.FAIL}[-] Cloudflare blocked or no form found: {str(e)}{Colors.ENDC}")
+                        return None, None
                     
             except Exception as e:
-                # Kalau tak jumpa reCAPTCHA, mungkin Cloudflare tengah challenge kita
-                page_content = page.content()
-                if "cf-challenge" in page_content or "Just a moment" in page_content or "Enable JavaScript" in page_content:
-                    logging.error(f"{Colors.FAIL}[-] Cloudflare hard blocked the request.{Colors.ENDC}")
-                    return None, None
-                elif "crm-container" in page_content or "contribute" in page_content:
-                    # Kalau lulus Cloudflare tapi takde captcha
-                    logging.info(f"{Colors.OKGREEN}[+] Page loaded without Captcha.{Colors.ENDC}")
-                    return page_content, "no_captcha"
-                else:
-                    logging.error(f"{Colors.FAIL}[-] Unknown page state: {str(e)}{Colors.ENDC}")
-                    return None, None
+                logging.error(f"{Colors.FAIL}[-] Failed to load page (Timeout/Proxy): {str(e)}{Colors.ENDC}")
+                return None, None
+            finally:
+                browser.close()
                 
-        except Exception as e:
-            logging.error(f"{Colors.FAIL}Cloudflare block or timeout: {str(e)}{Colors.ENDC}")
-            return None, None
-        finally:
-            browser.close()
+    except Exception as e:
+        # INI PENTING: Kalau Playwright tak install betul, dia akan print error sini
+        logging.error(f"{Colors.FAIL}[-] Playwright Crash Error: {str(e)}{Colors.ENDC}")
+        return None, None
 
 # ==========================================
 
