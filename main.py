@@ -15,20 +15,11 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
 import base64
 
-# --- IMPORT UNTUK BYPASS CLOUDFLARE & GEMINI AI ---
+# --- IMPORT UNTUK BYPASS CLOUDFLARE ---
 from playwright.sync_api import sync_playwright
-from google import genai
-from google.genai import types
 
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Setup Gemini AI (Package Baru)
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    client = genai.Client(api_key=GEMINI_API_KEY)
-else:
-    client = None
 
 app = Flask(__name__)
 
@@ -123,31 +114,50 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI GEMINI TEBAK GAMBAR (Fix Validation)
+# FUNGSI GEMINI TEBAK GAMBAR (GUNA REQUESTS)
 # ==========================================
 def ask_gemini_for_boxes(image_bytes):
-    if not client:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
         logging.error(f"{Colors.FAIL}[-] GEMINI_API_KEY not set!{Colors.ENDC}")
         return []
         
     try:
         logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
-        prompt = "This is a Google reCAPTCHA image challenge. There is a grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
         
-        # Guna types.Part yang betul
-        image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+        # Encode bytes ke base64
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=[prompt, image_part]
-        )
-        text = response.text.strip()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "X-goog-api-key": api_key
+        }
         
-        # Extract numbers from response
-        numbers = re.findall(r'\d+', text)
-        boxes = [int(n) for n in numbers if 1 <= int(n) <= 9]
-        logging.info(f"{Colors.OKGREEN}[+] Gemini replied: Click boxes {boxes}{Colors.ENDC}")
-        return boxes
+        prompt_text = "This is a Google reCAPTCHA image challenge. There is a grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
+        
+        data = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt_text},
+                        {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
+                    ]
+                }
+            ]
+        }
+        
+        resp = requests.post(url, headers=headers, json=data, timeout=20)
+        
+        if resp.status_code == 200:
+            text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+            numbers = re.findall(r'\d+', text)
+            boxes = [int(n) for n in numbers if 1 <= int(n) <= 9]
+            logging.info(f"{Colors.OKGREEN}[+] Gemini replied: Click boxes {boxes}{Colors.ENDC}")
+            return boxes
+        else:
+            logging.error(f"{Colors.FAIL}[-] Gemini HTTP Error {resp.status_code}: {resp.text}{Colors.ENDC}")
+            return []
     except Exception as e:
         logging.error(f"{Colors.FAIL}[-] Gemini Error: {str(e)}{Colors.ENDC}")
         return []
