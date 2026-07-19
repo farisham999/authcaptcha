@@ -126,15 +126,8 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 "--disable-features=IsolateOrigins,site-per-process"
             ]
             
-            # FIX FORMAT PROXY UNTUK PLAYWRIGHT
-            pw_proxy = None
-            if proxy_url:
-                if not proxy_url.startswith('http://') and not proxy_url.startswith('https://') and not proxy_url.startswith('socks5://'):
-                    pw_proxy = f"http://{proxy_url}"
-                else:
-                    pw_proxy = proxy_url
-                browser_args.append(f"--proxy-server={pw_proxy}")
-                
+            # Kita buang proxy dari Playwright supaya dia guna IP Railway (lebih stabil utk Cloudflare)
+            
             browser = p.chromium.launch(headless=True, args=browser_args)
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
@@ -153,10 +146,16 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
             page = context.new_page()
             
             try:
+                logging.info(f"{Colors.OKCYAN}[*] Opening browser...{Colors.ENDC}")
                 page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                page.mouse.move(100, 100)
-                page.mouse.move(200, 200)
-                time.sleep(2)
+                
+                # Buat pergerakan mouse palsu
+                try:
+                    page.mouse.move(100, 100)
+                    page.mouse.move(200, 200)
+                    time.sleep(2)
+                except:
+                    pass
                 
                 try:
                     page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
@@ -191,7 +190,6 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
     except Exception as e:
         logging.error(f"{Colors.FAIL}[-] Playwright Crash Error: {str(e)}{Colors.ENDC}")
         return None, None
-
 # ==========================================
 
 def detect_payment_processor(html):
