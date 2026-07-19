@@ -13,10 +13,6 @@ import urllib3
 from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
-import base64
-
-# --- IMPORT UNTUK BYPASS CLOUDFLARE ---
-from playwright.sync_api import sync_playwright
 
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -114,176 +110,53 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI GEMINI TEBAK GAMBAR
+# FUNGSI CAPMONSTER SOLVER
 # ==========================================
-def ask_gemini_for_boxes(image_bytes):
-    api_key = os.environ.get("GEMINI_API_KEY")
+def solve_capmonster(sitekey, url):
+    api_key = os.environ.get("CAPMONSTER_API_KEY")
     if not api_key:
-        logging.error(f"{Colors.FAIL}[-] GEMINI_API_KEY not set!{Colors.ENDC}")
-        return []
+        logging.error(f"{Colors.FAIL}[-] CAPMONSTER_API_KEY not set!{Colors.ENDC}")
+        return None
         
-    try:
-        logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
-        
-        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
-        headers = {
-            "Content-Type": "application/json",
-            "X-goog-api-key": api_key
+    logging.info(f"{Colors.WARNING}[!] reCAPTCHA detected. Sending to CapMonster...{Colors.ENDC}")
+    
+    # Submit task
+    submit_url = "https://api.capmonster.cloud/createTask"
+    data = {
+        "clientKey": api_key,
+        "task": {
+            "type": "NoCaptchaTaskProxyless",
+            "websiteURL": url,
+            "websiteKey": sitekey
         }
-        
-        prompt_text = "This is a Google reCAPTCHA image challenge. There is a grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
-        
-        data = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt_text},
-                        {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
-                    ]
-                }
-            ]
-        }
-        
-        resp = requests.post(url, headers=headers, json=data, timeout=20)
-        
-        if resp.status_code == 200:
-            text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-            numbers = re.findall(r'\d+', text)
-            boxes = [int(n) for n in numbers if 1 <= int(n) <= 9]
-            logging.info(f"{Colors.OKGREEN}[+] Gemini replied: Click boxes {boxes}{Colors.ENDC}")
-            return boxes
-        else:
-            logging.error(f"{Colors.FAIL}[-] Gemini HTTP Error {resp.status_code}: {resp.text}{Colors.ENDC}")
-            return []
-    except Exception as e:
-        logging.error(f"{Colors.FAIL}[-] Gemini Error: {str(e)}{Colors.ENDC}")
-        return []
-
-# ==========================================
-# BYPASS CLOUDFLARE & CAPTCHA (3 KALI CUBA + WAIT IMAGE LOAD)
-# ==========================================
-def bypass_cloudflare_and_captcha(url, proxy_url=None):
-    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini AI)...{Colors.ENDC}")
+    }
+    
     try:
-        with sync_playwright() as p:
-            browser_args = [
-                "--no-sandbox", 
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
-            ]
-            if proxy_url:
-                pw_proxy = proxy_url
-                if not pw_proxy.startswith('http'): pw_proxy = f"http://{pw_proxy}"
-                browser_args.append(f"--proxy-server={pw_proxy}")
-                
-            browser = p.chromium.launch(headless=True, args=browser_args)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080}
-            )
+        resp = requests.post(submit_url, json=data).json()
+        if resp.get('errorId') != 0:
+            logging.error(f"{Colors.FAIL}CapMonster Error: {resp.get('errorDescription')}{Colors.ENDC}")
+            return None
             
-            context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {get() { return false; }});
-                Object.defineProperty(navigator, 'plugins', {get() { return [1, 2, 3, 4, 5]; }});
-                Object.defineProperty(navigator, 'languages', {get() { return ['en-US', 'en']; }});
-                window.chrome = { runtime: {} };
-            """)
-            
-            page = context.new_page()
-            
-            try:
-                logging.info(f"{Colors.OKCYAN}[*] Opening browser...{Colors.ENDC}")
-                page.goto(url, timeout=45000, wait_until="domcontentloaded")
+        task_id = resp.get('taskId')
+        logging.info(f"{Colors.OKBLUE}[*] CapMonster Task ID: {task_id}. Waiting...{Colors.ENDC}")
+        
+        # Polling for result (Tunggu CapMonster solve)
+        result_url = "https://api.capmonster.cloud/getTaskResult"
+        for _ in range(20):  # Max 100 seconds
+            time.sleep(5)
+            res = requests.post(result_url, json={"clientKey": api_key, "taskId": task_id}).json()
+            if res.get('status') == 'ready':
+                token = res['solution']['gRecaptchaResponse']
+                logging.info(f"{Colors.OKGREEN}[+] CapMonster Solved!{Colors.ENDC}")
+                return token
+            elif res.get('errorId') != 0:
+                logging.error(f"{Colors.FAIL}CapMonster Failed: {res.get('errorDescription')}{Colors.ENDC}")
+                return None
                 
-                try:
-                    page.mouse.move(100, 100)
-                    page.mouse.move(200, 200)
-                except: pass
-                
-                logging.info(f"{Colors.OKCYAN}[*] Waiting for reCAPTCHA...{Colors.ENDC}")
-                page.wait_for_selector("iframe[title='reCAPTCHA']", timeout=15000)
-                
-                frame = page.frame_locator("iframe[title='reCAPTCHA']")
-                frame.locator("#recaptcha-anchor").click()
-                time.sleep(3)
-                
-                # Check if token is already there (auto pass)
-                token = page.evaluate("document.getElementById('g-recaptcha-response').value")
-                if token:
-                    logging.info(f"{Colors.OKGREEN}[+] Auto-passed reCAPTCHA!{Colors.ENDC}")
-                    return page.content(), token
-                
-                # If no token, means Image Challenge appeared
-                logging.info(f"{Colors.WARNING}[!] Image Challenge detected.{Colors.ENDC}")
-                challenge_frame = page.frame_locator("iframe[title='recaptcha challenge expires in two minutes']")
-                
-                challenge_frame.locator("#rc-imageselect-target").wait_for(timeout=15000)
-                
-                # ---- LOOP 3 KALI CUBA ----
-                for attempt in range(1, 4):
-                    logging.info(f"{Colors.OKCYAN}[*] Attempt {attempt}/3... Waiting for image to load...{Colors.ENDC}")
-                    
-                    # TUNGGU GAMBAR BENAR-BENAR HABIS LOAD
-                    try:
-                        challenge_frame.locator("#rc-imageselect-target img").wait_for(timeout=15000)
-                        # Tunggu sikit lepas img load utk elakkan lag
-                        time.sleep(2)
-                    except:
-                        time.sleep(3)
-                    
-                    # Screenshot the challenge image
-                    image_element = challenge_frame.locator("#rc-imageselect-target")
-                    image_bytes = image_element.screenshot()
-                    
-                    # Ask Gemini
-                    boxes_to_click = ask_gemini_for_boxes(image_bytes)
-                    
-                    if boxes_to_click:
-                        for box_num in boxes_to_click:
-                            row = (box_num - 1) // 3 + 1
-                            col = (box_num - 1) % 3 + 1
-                            selector = f"td:nth-child({col})"
-                            if row > 1:
-                                selector = f"tr:nth-child({row}) td:nth-child({col})"
-                            
-                            try:
-                                challenge_frame.locator(f"#rc-imageselect-target {selector}").click()
-                                time.sleep(0.5)
-                            except Exception as e:
-                                pass
-                        
-                        time.sleep(1)
-                        # Click Verify button
-                        challenge_frame.locator("#recaptcha-verify-button").click()
-                        time.sleep(4)
-                        
-                        # Check if we got the token
-                        token = page.evaluate("document.getElementById('g-recaptcha-response').value")
-                        if token:
-                            logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed by Gemini on attempt {attempt}!{Colors.ENDC}")
-                            return page.content(), token
-                        else:
-                            logging.error(f"{Colors.FAIL}[-] Attempt {attempt} failed. Trying next image...{Colors.ENDC}")
-                    else:
-                        logging.error(f"{Colors.FAIL}[-] Gemini couldn't determine boxes on attempt {attempt}.{Colors.ENDC}")
-                
-                # Kalau 3 kali gagal, serah kalah
-                logging.error(f"{Colors.FAIL}[-] All 3 attempts failed to bypass reCAPTCHA.{Colors.ENDC}")
-                return None, None
-                    
-            except Exception as e:
-                logging.error(f"{Colors.FAIL}[-] Error during bypass: {str(e)}{Colors.ENDC}")
-                return None, None
-            finally:
-                browser.close()
-                
+        return None
     except Exception as e:
-        logging.error(f"{Colors.FAIL}[-] Playwright Crash Error: {str(e)}{Colors.ENDC}")
-        return None, None
-
-# ==========================================
+        logging.error(f"{Colors.FAIL}CapMonster Exception: {str(e)}{Colors.ENDC}")
+        return None
 
 def detect_payment_processor(html):
     processors = {'authorize': ['authorize.net', 'authorize', 'paymentech', 'cybersource'], 'stripe': ['stripe', 'stripe.js', 'stripe.com', 'v3/stripe'], 'paypal': ['paypal', 'paypal.com']}
@@ -360,11 +233,26 @@ def extract_raw_fields(html, soup, form):
 
 def get_form_action_and_payload(session, url, proxy_url):
     try:
-        html, captcha_token = bypass_cloudflare_and_captcha(url, proxy_url)
+        resp = session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=True)
+        if resp.status_code == 403: return None, None, None, None, "403 Forbidden"
+        if resp.status_code in [403, 503] and re.search(r'cloudflare|cf-challenge', resp.text, re.I): return None, None, None, None, "Cloudflare protection"
+        if resp.status_code != 200 or not resp.text: return None, None, None, None, f"Bad HTTP {resp.status_code}"
         
-        if not html:
-            return None, None, None, None, "Cloudflare or Captcha Block"
+        html = resp.text
+        
+        # --- BYPASS CAPTCHA GUNA CAPMONSTER ---
+        site_key = None
+        captcha_match = re.search(r'<div[^>]*class="[^"]*g-recaptcha"[^>]*data-sitekey="([^"]+)"', html, re.I)
+        if not captcha_match:
+            captcha_match = re.search(r'grecaptcha\.execute\(\'([a-zA-Z0-9_-]+)\'', html, re.I)
             
+        if captcha_match:
+            site_key = captcha_match.group(1)
+            captcha_token = solve_capmonster(site_key, url)
+            if not captcha_token:
+                return None, None, None, None, "Failed to solve Captcha"
+        # -------------------------------------
+        
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
         if 'stripe' in processors: return None, None, None, None, "Stripe Detected"
@@ -385,7 +273,7 @@ def get_form_action_and_payload(session, url, proxy_url):
         
         payload = extract_raw_fields(html, soup, form)
         
-        if captcha_token and captcha_token != "no_captcha":
+        if site_key and captcha_token:
             payload['g-recaptcha-response'] = {'value': captcha_token, 'type': 'text', 'required': True}
             payload['g_recaptcha_response'] = {'value': captcha_token, 'type': 'text', 'required': True}
 
