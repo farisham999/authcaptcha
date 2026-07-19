@@ -17,18 +17,17 @@ import base64
 
 # --- IMPORT UNTUK BYPASS CLOUDFLARE & GEMINI AI ---
 from playwright.sync_api import sync_playwright
-import google.generativeai as genai
+from google import genai
 
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Setup Gemini AI
+# Setup Gemini AI (Package Baru)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    vision_model = genai.GenerativeModel('gemini-1.5-flash')
+    client = genai.Client(api_key=GEMINI_API_KEY)
 else:
-    vision_model = None
+    client = None
 
 app = Flask(__name__)
 
@@ -123,21 +122,22 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI GEMINI TEBAK GAMBAR
+# FUNGSI GEMINI TEBAK GAMBAR (Pakej Baru)
 # ==========================================
-def ask_gemini_for_boxes(image_b64):
-    if not vision_model:
+def ask_gemini_for_boxes(image_bytes):
+    if not client:
         logging.error(f"{Colors.FAIL}[-] GEMINI_API_KEY not set!{Colors.ENDC}")
         return []
         
     try:
         logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
-        prompt = "This is a Google reCAPTCHA image challenge. There is a 3x3 grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
+        prompt = "This is a Google reCAPTCHA image challenge. There is a grid of images. Tell me which grid numbers contain the target object. The grid is numbered 1 to 9 from left to right, top to bottom. Reply ONLY with the numbers separated by commas (e.g., 1,4,5). If none, reply 0."
         
-        img_data = base64.b64decode(image_b64)
-        img_part = {"mime_type": "image/jpeg", "data": img_data}
-        
-        response = vision_model.generate_content([prompt, img_part])
+        # Guna format baru google-genai
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=[prompt, {"mime_type": "image/jpeg", "data": image_bytes}]
+        )
         text = response.text.strip()
         
         # Extract numbers from response
@@ -207,19 +207,16 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 logging.info(f"{Colors.WARNING}[!] Image Challenge detected. Getting screenshot...{Colors.ENDC}")
                 challenge_frame = page.frame_locator("iframe[title='recaptcha challenge expires in two minutes']")
                 
-                # Wait for the image to load
-                challenge_frame.locator(".rc-imageselect-table-33").wait_for(timeout=10000)
+                # Tunggu gambarutama load (kita guna #rc-imageselect-target)
+                challenge_frame.locator("#rc-imageselect-target").wait_for(timeout=15000)
                 time.sleep(2) # Give it a moment to fully render
                 
                 # Screenshot the challenge image
                 image_element = challenge_frame.locator("#rc-imageselect-target")
-                image_b64 = image_element.screenshot()
-                
-                # Convert bytes to base64 string
-                image_b64_str = base64.b64encode(image_b64).decode('utf-8')
+                image_bytes = image_element.screenshot()
                 
                 # Ask Gemini
-                boxes_to_click = ask_gemini_for_boxes(image_b64_str)
+                boxes_to_click = ask_gemini_for_boxes(image_bytes)
                 
                 if boxes_to_click:
                     # Click the boxes (3x3 grid)
