@@ -114,7 +114,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI GEMINI TEBAK GAMBAR (GUNA REQUESTS)
+# FUNGSI GEMINI PRO TEBAK GAMBAR
 # ==========================================
 def ask_gemini_for_boxes(image_bytes):
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -123,11 +123,12 @@ def ask_gemini_for_boxes(image_bytes):
         return []
         
     try:
-        logging.info(f"{Colors.OKCYAN}[*] Asking Gemini AI to solve image...{Colors.ENDC}")
+        logging.info(f"{Colors.OKCYAN}[*] Asking Gemini 1.5 Pro to solve image...{Colors.ENDC}")
         
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+        # TUKAR KEPADA MODEL PRO YANG LEBIH BIJAK
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
         headers = {
             "Content-Type": "application/json",
             "X-goog-api-key": api_key
@@ -152,7 +153,7 @@ def ask_gemini_for_boxes(image_bytes):
             text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
             numbers = re.findall(r'\d+', text)
             boxes = [int(n) for n in numbers if 1 <= int(n) <= 9]
-            logging.info(f"{Colors.OKGREEN}[+] Gemini replied: Click boxes {boxes}{Colors.ENDC}")
+            logging.info(f"{Colors.OKGREEN}[+] Gemini Pro replied: Click boxes {boxes}{Colors.ENDC}")
             return boxes
         else:
             logging.error(f"{Colors.FAIL}[-] Gemini HTTP Error {resp.status_code}: {resp.text}{Colors.ENDC}")
@@ -162,10 +163,10 @@ def ask_gemini_for_boxes(image_bytes):
         return []
 
 # ==========================================
-# BYPASS CLOUDFLARE & CAPTCHA GUNA GEMINI
+# BYPASS CLOUDFLARE & CAPTCHA (3 KALI CUBA)
 # ==========================================
 def bypass_cloudflare_and_captcha(url, proxy_url=None):
-    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini AI)...{Colors.ENDC}")
+    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha (Gemini 1.5 Pro)...{Colors.ENDC}")
     try:
         with sync_playwright() as p:
             browser_args = [
@@ -216,52 +217,55 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                     return page.content(), token
                 
                 # If no token, means Image Challenge appeared
-                logging.info(f"{Colors.WARNING}[!] Image Challenge detected. Getting screenshot...{Colors.ENDC}")
+                logging.info(f"{Colors.WARNING}[!] Image Challenge detected.{Colors.ENDC}")
                 challenge_frame = page.frame_locator("iframe[title='recaptcha challenge expires in two minutes']")
                 
-                # Tunggu gambar utama load
                 challenge_frame.locator("#rc-imageselect-target").wait_for(timeout=15000)
-                time.sleep(2) # Give it a moment to fully render
                 
-                # Screenshot the challenge image
-                image_element = challenge_frame.locator("#rc-imageselect-target")
-                image_bytes = image_element.screenshot()
-                
-                # Ask Gemini
-                boxes_to_click = ask_gemini_for_boxes(image_bytes)
-                
-                if boxes_to_click:
-                    # Click the boxes (3x3 grid)
-                    for box_num in boxes_to_click:
-                        # Calculate row and col (1-3)
-                        row = (box_num - 1) // 3 + 1
-                        col = (box_num - 1) % 3 + 1
-                        selector = f"td:nth-child({col})"
-                        if row > 1:
-                            selector = f"tr:nth-child({row}) td:nth-child({col})"
+                # ---- LOOP 3 KALI CUBA ----
+                for attempt in range(1, 4):
+                    logging.info(f"{Colors.OKCYAN}[*] Attempt {attempt}/3... Getting screenshot...{Colors.ENDC}")
+                    time.sleep(2) # Give it a moment to fully render
+                    
+                    # Screenshot the challenge image
+                    image_element = challenge_frame.locator("#rc-imageselect-target")
+                    image_bytes = image_element.screenshot()
+                    
+                    # Ask Gemini
+                    boxes_to_click = ask_gemini_for_boxes(image_bytes)
+                    
+                    if boxes_to_click:
+                        for box_num in boxes_to_click:
+                            row = (box_num - 1) // 3 + 1
+                            col = (box_num - 1) % 3 + 1
+                            selector = f"td:nth-child({col})"
+                            if row > 1:
+                                selector = f"tr:nth-child({row}) td:nth-child({col})"
+                            
+                            try:
+                                challenge_frame.locator(f"#rc-imageselect-target {selector}").click()
+                                time.sleep(0.5)
+                            except Exception as e:
+                                pass
                         
-                        try:
-                            challenge_frame.locator(f"#rc-imageselect-target {selector}").click()
-                            time.sleep(0.5)
-                        except Exception as e:
-                            logging.error(f"Failed to click box {box_num}: {str(e)}")
-                    
-                    time.sleep(1)
-                    # Click Verify button
-                    challenge_frame.locator("#recaptcha-verify-button").click()
-                    time.sleep(4)
-                    
-                    # Check if we got the token
-                    token = page.evaluate("document.getElementById('g-recaptcha-response').value")
-                    if token:
-                        logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed by Gemini!{Colors.ENDC}")
-                        return page.content(), token
+                        time.sleep(1)
+                        # Click Verify button
+                        challenge_frame.locator("#recaptcha-verify-button").click()
+                        time.sleep(4)
+                        
+                        # Check if we got the token
+                        token = page.evaluate("document.getElementById('g-recaptcha-response').value")
+                        if token:
+                            logging.info(f"{Colors.OKGREEN}[+] reCAPTCHA Bypassed by Gemini Pro on attempt {attempt}!{Colors.ENDC}")
+                            return page.content(), token
+                        else:
+                            logging.error(f"{Colors.FAIL}[-] Attempt {attempt} failed. Trying next image...{Colors.ENDC}")
                     else:
-                        logging.error(f"{Colors.FAIL}[-] Gemini failed to solve. Maybe wrong guess.{Colors.ENDC}")
-                        return None, None
-                else:
-                    logging.error(f"{Colors.FAIL}[-] Gemini couldn't determine boxes.{Colors.ENDC}")
-                    return None, None
+                        logging.error(f"{Colors.FAIL}[-] Gemini couldn't determine boxes on attempt {attempt}.{Colors.ENDC}")
+                
+                # Kalau 3 kali gagal, serah kalah
+                logging.error(f"{Colors.FAIL}[-] All 3 attempts failed to bypass reCAPTCHA.{Colors.ENDC}")
+                return None, None
                     
             except Exception as e:
                 logging.error(f"{Colors.FAIL}[-] Error during bypass: {str(e)}{Colors.ENDC}")
