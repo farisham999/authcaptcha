@@ -17,7 +17,6 @@ from urllib.parse import urljoin, urlparse, parse_qs
 # --- IMPORT UNTUK BYPASS CLOUDFLARE & CAPTCHA ---
 from playwright.sync_api import sync_playwright
 
-# FIX RAILWAY CLOUDFLARE BLOCK
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -114,15 +113,16 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# BYPASS CLOUDFLARE & CAPTCHA GUNA PLAYWRIGHT
+# BYPASS CLOUDFLARE STRICT & CAPTCHA
 # ==========================================
 def bypass_cloudflare_and_captcha(url, proxy_url=None):
-    logging.info(f"{Colors.WARNING}[!] Bypassing Cloudflare & Captcha...{Colors.ENDC}")
+    logging.info(f"{Colors.WARNING}[!] Bypassing Strict Cloudflare & Captcha...{Colors.ENDC}")
     with sync_playwright() as p:
         browser_args = [
             "--no-sandbox", 
             "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled"
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process"
         ]
         if proxy_url:
             browser_args.append(f"--proxy-server={proxy_url}")
@@ -130,12 +130,34 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
         browser = p.chromium.launch(headless=True, args=browser_args)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080}
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            timezone_id="America/New_York"
         )
+        
+        # Inject script anti-detect sebelum page load
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get() { return false; }});
+            Object.defineProperty(navigator, 'plugins', {get() { return [1, 2, 3, 4, 5]; }});
+            Object.defineProperty(navigator, 'languages', {get() { return ['en-US', 'en']; }});
+            window.chrome = { runtime: {} };
+        """)
+        
         page = context.new_page()
         
         try:
-            page.goto(url, timeout=45000, wait_until="networkidle")
+            page.goto(url, timeout=45000, wait_until="domcontentloaded")
+            
+            # Buat pergerakan mouse palsu (Cloudflare check benda ni)
+            try:
+                page.mouse.move(100, 100)
+                page.mouse.move(200, 200)
+                page.mouse.move(150, 50)
+                time.sleep(2)
+            except:
+                pass
+                
+            logging.info(f"{Colors.OKCYAN}[*] Waiting for page elements...{Colors.ENDC}")
             
             # Tunggu kotak reCAPTCHA keluar (max 15 saat)
             try:
@@ -146,10 +168,9 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                 frame = page.frame_locator("iframe[title='reCAPTCHA']")
                 frame.locator("#recaptcha-anchor").click()
                 
-                time.sleep(3)
+                time.sleep(4) # Tunggu dia verify
                 
                 # Check kalau dia bagi challenge (gambar) atau terus lulus
-                # Kebiasaannya kalau guna browser betul-betul, dia terus lulus
                 token = page.evaluate("document.getElementById('g-recaptcha-response').value")
                 
                 if token:
@@ -157,11 +178,22 @@ def bypass_cloudflare_and_captcha(url, proxy_url=None):
                     html_content = page.content()
                     return html_content, token
                 else:
+                    logging.error(f"{Colors.FAIL}[-] reCAPTCHA required image challenge. Cannot bypass.{Colors.ENDC}")
                     return None, None
                     
             except Exception as e:
-                logging.error(f"{Colors.FAIL}Captcha frame error: {str(e)}{Colors.ENDC}")
-                return None, None
+                # Kalau tak jumpa reCAPTCHA, mungkin Cloudflare tengah challenge kita
+                page_content = page.content()
+                if "cf-challenge" in page_content or "Just a moment" in page_content or "Enable JavaScript" in page_content:
+                    logging.error(f"{Colors.FAIL}[-] Cloudflare hard blocked the request.{Colors.ENDC}")
+                    return None, None
+                elif "crm-container" in page_content or "contribute" in page_content:
+                    # Kalau lulus Cloudflare tapi takde captcha
+                    logging.info(f"{Colors.OKGREEN}[+] Page loaded without Captcha.{Colors.ENDC}")
+                    return page_content, "no_captcha"
+                else:
+                    logging.error(f"{Colors.FAIL}[-] Unknown page state: {str(e)}{Colors.ENDC}")
+                    return None, None
                 
         except Exception as e:
             logging.error(f"{Colors.FAIL}Cloudflare block or timeout: {str(e)}{Colors.ENDC}")
@@ -245,12 +277,11 @@ def extract_raw_fields(html, soup, form):
     return payload
 
 def get_form_action_and_payload(session, url, proxy_url):
-    # Kita buang session.get() sebab Playwright dah buka semuanya
     try:
         html, captcha_token = bypass_cloudflare_and_captcha(url, proxy_url)
         
         if not html:
-            return None, None, None, None, "Cloudflare or Captcha Failed"
+            return None, None, None, None, "Cloudflare or Captcha Block"
             
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
@@ -272,7 +303,7 @@ def get_form_action_and_payload(session, url, proxy_url):
         
         payload = extract_raw_fields(html, soup, form)
         
-        if captcha_token:
+        if captcha_token and captcha_token != "no_captcha":
             payload['g-recaptcha-response'] = {'value': captcha_token, 'type': 'text', 'required': True}
             payload['g_recaptcha_response'] = {'value': captcha_token, 'type': 'text', 'required': True}
 
