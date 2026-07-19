@@ -3,4 +3,4 @@ requests
 beautifulsoup4
 urllib3
 playwright
-google-generativeai
+google-genai
