@@ -486,7 +486,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             soup_resp = BeautifulSoup(response.text, 'html.parser')
 
             # ---> PRINT HTML BODY UNTUK TENGOK SAMPAI MANA <---
-            logging.info(f"--- HTML BODY AFTER SUBMIT ---\n{soup_resp.get_text(separator=' ', strip=True)[:1000]}\n-------------------------------")
+            logging.info(f"--- HTML BODY AFTER SUBMIT ---\n{soup_resp.get_text(separator=' ', strip=True)}\n-------------------------------")
             
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
             is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
