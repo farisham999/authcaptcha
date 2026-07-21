@@ -483,6 +483,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
             response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
 
+            # ---> PRINT HTML RESPONSE PERTAMA <---
+            logging.info(f"\n--- RAW HTML RESPONSE (AFTER SUBMIT) ---\n{response.text[:3000]}\n-------------------------------\n")
+
             soup_resp = BeautifulSoup(response.text, 'html.parser')
 
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
@@ -502,6 +505,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
                 
+                # ---> PRINT HTML RESPONSE KEDUA (CONFIRM) <---
+                logging.info(f"\n--- RAW HTML RESPONSE (AFTER CONFIRM) ---\n{confirm_response.text[:3000]}\n-------------------------------\n")
+
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
                     if session: session.close()
