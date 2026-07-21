@@ -16,7 +16,6 @@ from urllib.parse import urljoin, urlparse, parse_qs
 
 # FIX RAILWAY CLOUDFLARE BLOCK: Paksa guna IPv4
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -105,10 +104,8 @@ def create_session(proxy_url=None):
         parts = proxy_url.split(':')
         if len(parts) == 4:
             proxy_url = f"{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
-        
         if not proxy_url.startswith('http'): 
             proxy_url = f'http://{proxy_url}'
-            
         session.proxies = {"http": proxy_url, "https": proxy_url}
         
     return session
@@ -483,9 +480,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
             response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
 
-            # ---> PRINT HTML RESPONSE PERTAMA <---
-            logging.info(f"\n--- RAW HTML RESPONSE (AFTER SUBMIT) ---\n{response.text[:3000]}\n-------------------------------\n")
-
             soup_resp = BeautifulSoup(response.text, 'html.parser')
 
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
@@ -505,9 +499,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
                 
-                # ---> PRINT HTML RESPONSE KEDUA (CONFIRM) <---
-                logging.info(f"\n--- RAW HTML RESPONSE (AFTER CONFIRM) ---\n{confirm_response.text[:3000]}\n-------------------------------\n")
-
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
                     if session: session.close()
