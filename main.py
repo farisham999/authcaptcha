@@ -191,9 +191,17 @@ def get_form_action_and_payload(session, url, proxy_url):
         if resp.status_code != 200 or not resp.text: return None, None, None, None, f"Bad HTTP {resp.status_code}"
         
         html = resp.text
-        # COMMENT OUT BLOCK CAPTCHA NI SUPAYA DIA TAK STOP BILA JUMPA CAPTCHA
-        # if re.search(r'<iframe[^>]*src=["\'][^"\']*google\.com/recaptcha|<div[^>]*class=["\'][^"\']*g-recaptcha', html, re.I): return None, None, None, None, "CAPTCHA"
         
+        # ---> TAMBAHAN: CHECK QFKEY TERLEBIH DAHULU <---
+        qfkey = None
+        for pattern in [r'name="qfKey"\s+value="([^"]+)"', r'name="qfKey"\s*type="hidden"\s*value="([^"]+)"', r'qfKey=([a-zA-Z0-9]+)']:
+            match = re.search(pattern, html)
+            if match: qfkey = match.group(1); break
+            
+        if not qfkey:
+            return None, None, None, None, "Failed: No qfKey (Blocked by Captcha/Cloudflare)"
+        # ---------------------------------------------
+
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
         if 'stripe' in processors: return None, None, None, None, "Stripe Detected"
@@ -206,11 +214,6 @@ def get_form_action_and_payload(session, url, proxy_url):
         form_action = form.get('action') or re.search(r'<form[^>]*action="([^"]+)"', html).group(1) if re.search(r'<form[^>]*action="([^"]+)"', html) else None
         if form_action and not form_action.startswith('http'): form_action = urljoin(url, form_action)
         if not form_action: return None, None, None, None, "Form action not found"
-        
-        qfkey = None
-        for pattern in [r'name="qfKey"\s+value="([^"]+)"', r'name="qfKey"\s*type="hidden"\s*value="([^"]+)"', r'qfKey=([a-zA-Z0-9]+)']:
-            match = re.search(pattern, html)
-            if match: qfkey = match.group(1); break
         
         payload = extract_raw_fields(html, soup, form)
         return qfkey, form_action, payload, has_authorize, "OK"
@@ -249,7 +252,7 @@ def parse_response(html, url):
     if '_qf_Confirm_display=true' in url or '_qf_Confirm_display=1' in url:
         return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
     
-    return {'approved': False, 'has_msg': False, 'message': 'Transaction declined (No specific reason found)', 'clean_response': 'No specific reason found'}
+    return {'approved': False, 'has_msg': False, 'message': 'Card Declined / Blocked by Site (Silent Response)', 'clean_response': 'Silent Block'}
 
 def process_site_for_payload(url, override_proxy=None):
     proxy_url = override_proxy if override_proxy else None
