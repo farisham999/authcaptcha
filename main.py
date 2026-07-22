@@ -122,7 +122,7 @@ def create_session(proxy_url=None):
 # ==========================================
 # FUNGSI STEEL DEV UNTUK BYPASS BLOCK
 # ==========================================
-def fetch_via_steel(url, proxy_url=None):
+def fetch_via_steel(url, proxy_url=None, python_session=None):
     headers = {
         "steel-api-key": STEEL_API_KEY,
         "Content-Type": "application/json"
@@ -153,11 +153,12 @@ def fetch_via_steel(url, proxy_url=None):
         # 1. Cipta session browser dalam Steel
         create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=headers, json=session_payload, timeout=15)
         
-        # DEBUG: Tengok status code dan response text kalau gagal
-        if create_resp.status_code != 200:
+        # FIX: Steel bagi 201 Created, bukan 200 OK
+        if create_resp.status_code not in [200, 201]:
             return None, f"Steel Auth Error (Code {create_resp.status_code}): {create_resp.text}"
             
-        session_id = create_resp.json()['id']
+        session_data = create_resp.json()
+        session_id = session_data['id']
         
         # 2. Scrape URL menggunakan Session Steel tu
         scrape_resp = requests.post(
@@ -173,6 +174,19 @@ def fetch_via_steel(url, proxy_url=None):
         
         if scrape_data.get('status') == 'success' and scrape_data.get('data'):
             html_content = scrape_data['data']
+            
+            # PINDAHKAN COOKIES DARI STEEL KE PYTHON SESSION
+            # Supaya bila kita POST (submit cc), Cloudflare tak block
+            if python_session:
+                try:
+                    # Steel letak cookies di dalam scrape_data
+                    steel_cookies = scrape_data.get('cookies', [])
+                    for cookie in steel_cookies:
+                        if isinstance(cookie, dict) and 'name' in cookie and 'value' in cookie:
+                            python_session.cookies.set(cookie['name'], cookie['value'])
+                except Exception as ce:
+                    logging.info(f"Warning: Gagal pindah cookies: {ce}")
+
             return html_content, "OK"
         else:
             return None, "Steel Scrape Failed"
@@ -260,7 +274,7 @@ def get_form_action_and_payload(session, url, proxy_url):
         # ==============================================================
         # GUNA STEEL UNTUK DAPATKAN HTML & BYPASS BLOCK
         # ==============================================================
-        html, err_msg = fetch_via_steel(url, proxy_url)
+        html, err_msg = fetch_via_steel(url, proxy_url, session)
         
         if err_msg != "OK" or not html:
             return None, None, None, None, err_msg
