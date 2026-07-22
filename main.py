@@ -222,7 +222,7 @@ def parse_response(html, url):
     if status_div:
         full_error = status_div.get_text(strip=True)
         logger.warning(f"ERROR DIV FOUND: {full_error}")
-        logger.warning(f"ERROR HTML SNIPPET:\n{str(status_div)[:1500]}")
+        logger.warning(f"ERROR HTML SNIPPET:\n{str(status_div)[:2000]}")
         
         error_items = status_div.find_all('li')
         if error_items:
@@ -240,6 +240,8 @@ def parse_response(html, url):
         return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
    
     logger.warning("No error div found - stuck on form")
+    # Dump more HTML for debug
+    logger.warning(f"FULL RESPONSE SNIPPET (first 3000 chars):\n{html[:3000]}")
     return {'approved': False, 'has_msg': False, 'message': 'Form Incomplete / Stuck on Initial Page', 'clean_response': 'Stuck on Initial'}
 
 def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=False):
@@ -413,6 +415,10 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
             logger.info(f"POST Response Status: {response.status_code} | URL: {response.url}")
+            
+            # Dump response if stuck
+            if not '_qf_Confirm' in response.url and not '_qf_ThankYou' in response.url:
+                logger.warning(f"STUCK RESPONSE SNIPPET:\n{response.text[:2500]}")
             
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
