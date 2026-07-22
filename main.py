@@ -213,21 +213,25 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
    
+    logger.info(f"Response URL: {url}")
+    
     status_div = soup.find('div', class_='status')
     if not status_div:
-        status_div = soup.find('div', class_=re.compile(r'alert|error', re.I))
-       
+        status_div = soup.find('div', class_=re.compile(r'alert|error|messages', re.I))
+    
     if status_div:
+        full_error = status_div.get_text(strip=True)
+        logger.warning(f"ERROR DIV FOUND: {full_error}")
+        logger.warning(f"ERROR HTML SNIPPET:\n{str(status_div)[:1500]}")
+        
         error_items = status_div.find_all('li')
         if error_items:
             errors = [item.get_text(strip=True) for item in error_items]
             error_message = " | ".join(errors)
             return {'approved': False, 'has_msg': True, 'message': f'Form Error: {error_message}', 'clean_response': error_message}
         else:
-            error_text = status_div.get_text(strip=True)
-            error_text = re.sub(r'\s+', ' ', error_text).strip()
-            if error_text and len(error_text) > 3:
-                return {'approved': False, 'has_msg': True, 'message': f'Status: {error_text}', 'clean_response': error_text}
+            error_text = re.sub(r'\s+', ' ', full_error).strip()
+            return {'approved': False, 'has_msg': True, 'message': f'Status: {error_text}', 'clean_response': error_text}
    
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'has_msg': False, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
@@ -235,6 +239,7 @@ def parse_response(html, url):
     if '_qf_Confirm_display=true' in url or '_qf_Confirm_display=1' in url:
         return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
    
+    logger.warning("No error div found - stuck on form")
     return {'approved': False, 'has_msg': False, 'message': 'Form Incomplete / Stuck on Initial Page', 'clean_response': 'Stuck on Initial'}
 
 def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=False):
@@ -258,7 +263,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     if '_detected_payment_processor_id' in raw_payload:
         final_payload['payment_processor_id'] = raw_payload['_detected_payment_processor_id'].get('value', '4')
     
-    # FORCE NON-RECURRING
     final_payload['is_recur'] = "0"
     
     price_selected = False
@@ -280,7 +284,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             final_payload[key] = current_value if current_value else "1"
             continue
 
-        # Recurring fields - force off
         if 'frequency' in key_lower or 'installments' in key_lower or 'recur' in key_lower:
             if key == 'frequency_interval':
                 final_payload[key] = "1"
