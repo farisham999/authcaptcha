@@ -340,8 +340,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
 
         if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
         if field_type in ['submit', 'button', 'image']: continue
-        # Buang condition nak skip kalau current_value kosong, biarkan dia hantar string kosong
-        # if current_value in ['null', None]: continue
 
         # OVERRIDE FIELD PENTING SAHAJA
         if 'hidden_processor' in key_lower:
