@@ -22,7 +22,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 
 # ==========================================
-# KONFIGURASI STEEL DEV (TUKAR KEPADA API KEY ANDA)
+# KONFIGURASI STEEL DEV 
 # ==========================================
 STEEL_API_KEY = "ste-NTvZbMDWUT6NtZKtRxMZDPnCFk56Eu5eT7y03zn4nRTkm0ebEXC9dGHTE9GwCpa6GHP1BclG5SIuPYBsrqUoQiPdRHLmFltzLw5"
 STEEL_BASE_URL = "https://api.steel.dev"
@@ -120,7 +120,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI BARU: GUNA STEEL DEV UNTUK BYPASS BLOCK
+# FUNGSI STEEL DEV UNTUK BYPASS BLOCK
 # ==========================================
 def fetch_via_steel(url, proxy_url=None):
     headers = {
@@ -128,7 +128,7 @@ def fetch_via_steel(url, proxy_url=None):
         "Content-Type": "application/json"
     }
     
-    # Formatkan proxy untuk Steel (user:pass:ip:port -> http://user:pass@ip:port)
+    # Formatkan proxy untuk Steel
     steel_proxy = None
     if proxy_url:
         parts = proxy_url.split(':')
@@ -143,7 +143,7 @@ def fetch_via_steel(url, proxy_url=None):
     session_payload = {
         "options": {
             "headless": True,
-            "solveCaptcha": True # Steel akan auto-solve Cloudflare/reCaptcha
+            "solveCaptcha": True
         }
     }
     if steel_proxy:
@@ -151,34 +151,36 @@ def fetch_via_steel(url, proxy_url=None):
         
     try:
         # 1. Cipta session browser dalam Steel
-        create_resp = requests.post(f"{STEEL_BASE_URL}/sessions", headers=headers, json=session_payload, timeout=15)
-        create_resp.raise_for_status()
+        create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=headers, json=session_payload, timeout=15)
+        
+        # DEBUG: Tengok status code dan response text kalau gagal
+        if create_resp.status_code != 200:
+            return None, f"Steel Auth Error (Code {create_resp.status_code}): {create_resp.text}"
+            
         session_id = create_resp.json()['id']
         
         # 2. Scrape URL menggunakan Session Steel tu
         scrape_resp = requests.post(
-            f"{STEEL_BASE_URL}/sessions/{session_id}/scrape", 
+            f"{STEEL_BASE_URL}/v1/sessions/{session_id}/scrape", 
             headers=headers, 
             json={"url": url}, 
             timeout=30
         )
         scrape_data = scrape_resp.json()
         
-        # 3. Tutup session Steel untuk jimat credit (SANGAT PENTING)
-        requests.delete(f"{STEEL_BASE_URL}/sessions/{session_id}", headers=headers)
+        # 3. Tutup session Steel untuk jimat credit
+        requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=headers)
         
         if scrape_data.get('status') == 'success' and scrape_data.get('data'):
             html_content = scrape_data['data']
-            # Steel tak bagi cookies terus kat API scrape, jadi kita rely pada HTML
             return html_content, "OK"
         else:
             return None, "Steel Scrape Failed"
             
     except Exception as e:
-        # Pastikan session ditutup walaupun ada error
         if 'session_id' in locals():
-            requests.delete(f"{STEEL_BASE_URL}/sessions/{session_id}", headers=headers)
-        return None, f"Steel Error: {str(e)}"
+            requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=headers)
+        return None, f"Steel Exception: {str(e)}"
 
 def detect_payment_processor(html):
     processors = {'authorize': ['authorize.net', 'authorize', 'paymentech', 'cybersource'], 'stripe': ['stripe', 'stripe.js', 'stripe.com', 'v3/stripe'], 'paypal': ['paypal', 'paypal.com']}
@@ -256,15 +258,13 @@ def extract_raw_fields(html, soup, form):
 def get_form_action_and_payload(session, url, proxy_url):
     try:
         # ==============================================================
-        # PERUBAHAN UTAMA: GUNA STEEL UNTUK DAPATKAN HTML & BYPASS BLOCK
+        # GUNA STEEL UNTUK DAPATKAN HTML & BYPASS BLOCK
         # ==============================================================
         html, err_msg = fetch_via_steel(url, proxy_url)
         
         if err_msg != "OK" or not html:
             return None, None, None, None, err_msg
         
-        # Buang check Cloudflare/Captcha lama sebab Steel dah settle
-        # Teruskan proses HTML yang dah bersih dari Steel
         processors = detect_payment_processor(html)
         has_authorize = 'authorize' in processors
         if 'stripe' in processors: return None, None, None, None, "Stripe Detected"
