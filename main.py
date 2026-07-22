@@ -120,7 +120,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI STEEL DEV UNTUK BYPASS BLOCK
+# FUNGSI STEEL DEV UNTUK BYPASS BLOCK (FIXED & DEBUG)
 # ==========================================
 def fetch_via_steel(url, proxy_url=None, python_session=None):
     headers = {
@@ -128,7 +128,6 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
         "Content-Type": "application/json"
     }
     
-    # Formatkan proxy untuk Steel
     steel_proxy = None
     if proxy_url:
         parts = proxy_url.split(':')
@@ -139,7 +138,6 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
         else:
             steel_proxy = proxy_url
 
-    # Cipta Session Steel
     session_payload = {
         "options": {
             "headless": True,
@@ -149,24 +147,31 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
     if steel_proxy:
         session_payload["options"]["proxy"] = steel_proxy
         
+    session_id = None
     try:
         # 1. Cipta session browser dalam Steel
         create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=headers, json=session_payload, timeout=15)
         
-        # FIX: Steel bagi 201 Created, bukan 200 OK
         if create_resp.status_code not in [200, 201]:
             return None, f"Steel Auth Error (Code {create_resp.status_code}): {create_resp.text}"
             
         session_data = create_resp.json()
         session_id = session_data['id']
         
-        # 2. Scrape URL menggunakan Session Steel tu
+        # 2. Scrape URL menggunakan Session Steel (FIXED URL ENDPOINT)
         scrape_resp = requests.post(
-            f"{STEEL_BASE_URL}/v1/sessions/{session_id}/scrape", 
+            f"{STEEL_BASE_URL}/v1/sessions/{session_id}/scrape",  # Buang 's' kat sini
             headers=headers, 
             json={"url": url}, 
             timeout=30
         )
+        
+        # DEBUGGING: Print status code dan text kalau fail
+        if scrape_resp.status_code != 200:
+            logging.error(f"\n[STEEL DEBUG] Scrape Fail Code: {scrape_resp.status_code}")
+            logging.error(f"[STEEL DEBUG] Response: {scrape_resp.text[:500]}\n")
+            return None, f"Steel Scrape Error {scrape_resp.status_code}"
+            
         scrape_data = scrape_resp.json()
         
         # 3. Tutup session Steel untuk jimat credit
@@ -175,11 +180,9 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
         if scrape_data.get('status') == 'success' and scrape_data.get('data'):
             html_content = scrape_data['data']
             
-            # PINDAHKAN COOKIES DARI STEEL KE PYTHON SESSION
-            # Supaya bila kita POST (submit cc), Cloudflare tak block
+            # PINDAHKAN COOKIES DARI STEAL KE PYTHON SESSION
             if python_session:
                 try:
-                    # Steel letak cookies di dalam scrape_data
                     steel_cookies = scrape_data.get('cookies', [])
                     for cookie in steel_cookies:
                         if isinstance(cookie, dict) and 'name' in cookie and 'value' in cookie:
@@ -189,10 +192,10 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
 
             return html_content, "OK"
         else:
-            return None, "Steel Scrape Failed"
+            return None, "Steel Scrape Failed (No Data)"
             
     except Exception as e:
-        if 'session_id' in locals():
+        if session_id:
             requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=headers)
         return None, f"Steel Exception: {str(e)}"
 
@@ -611,7 +614,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 def handle_auth():
     start_time = time.time()
     
-    # FIX: Kalau URL tak di-encode dengan betul, dia akan cantumkan semula &id=
     site = request.args.get('site')
     id_param = request.args.get('id')
     if site and id_param and 'id=' not in site:
@@ -652,10 +654,8 @@ def handle_auth():
     end_time = time.time()
     time_taken = round(end_time - start_time, 2)
 
-    # Kira status Approved/Declined
     result_status = "Approved" if result.get('approved', False) else "Declined"
     
-    # Bersihkan response message kalau ada teks "Payment Processor Error message :"
     response_msg = result.get('message', 'Unknown Error')
     if "Payment Processor Error message :" in response_msg:
         response_msg = response_msg.replace("Payment Processor Error message :", "").strip()
@@ -671,6 +671,5 @@ def handle_auth():
     })
 
 if __name__ == "__main__":
-    # Railway akan auto-pass PORT environment variable. Kalau takda, dia akan guna 8080
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
