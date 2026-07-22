@@ -122,7 +122,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI STEEL PLAYWRIGHT (AUTO RETRY & NETWORK IDLE)
+# FUNGSI STEEL PLAYWRIGHT (AUTO RETRY & FALLBACK)
 # ==========================================
 def fetch_via_steel(url, proxy_url=None, python_session=None):
     api_headers = {
@@ -149,7 +149,7 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
     if steel_proxy:
         session_payload["options"]["proxy"] = steel_proxy
         
-    max_retries = 3
+    max_retries = 2
     for attempt in range(max_retries):
         session_id = None
         try:
@@ -157,9 +157,10 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
             create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=api_headers, json=session_payload, timeout=15)
             if create_resp.status_code not in [200, 201]:
                 if attempt < max_retries - 1:
-                    time.sleep(3)
+                    time.sleep(2)
                     continue
-                return None, f"Steel Auth Error (Code {create_resp.status_code})"
+                # Kalau API create session gagal, terus fallback ke request biasa
+                raise Exception("Steel API Creation Failed")
                 
             session_data = create_resp.json()
             session_id = session_data['id']
@@ -174,12 +175,12 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
                 page = context.new_page()
                 
                 try:
-                    # Guna networkidle supaya dia tunggu cloudflare selesai load
-                    page.goto(url, timeout=45000, wait_until="networkidle")
+                    # Guna domcontentloaded sebab networkidle selalu timeout kalau website banyak request
+                    page.goto(url, timeout=30000, wait_until="domcontentloaded")
                     html_content = page.content()
                     
                     # Pindahkan Cookies dari Steel ke Python Requests Session
-                    if python_session:
+                    if python_session and html_content:
                         cookies = context.cookies()
                         for cookie in cookies:
                             python_session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', ''))
@@ -189,13 +190,13 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
                             python_session.headers.update({"User-Agent": user_agent})
                             
                 except Exception as nav_err:
-                    if attempt < max_retries - 1:
-                        time.sleep(3)
-                        continue
-                    return None, f"Steel Nav Error: {str(nav_err)}"
+                    raise Exception(f"Nav Error: {str(nav_err)}")
                 finally:
-                    page.close()
-                    browser.close()
+                    try:
+                        page.close()
+                        browser.close()
+                    except:
+                        pass
             
             # 3. Tutup session Steel kat API untuk jimat credit
             requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
@@ -203,18 +204,27 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
             if html_content:
                 return html_content, "OK"
             else:
-                return None, "Steel Scrape Failed (Empty HTML)"
+                raise Exception("Empty HTML")
                 
         except Exception as e:
             if 'session_id' in locals():
                 requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
             
             if attempt < max_retries - 1:
-                logging.info(f"Steel 502 Error, retrying in 3s... ({attempt+1}/{max_retries})")
-                time.sleep(3)
+                logging.info(f"Steel Error, retrying... ({attempt+1}/{max_retries})")
+                time.sleep(2)
                 continue
-                
-            return None, f"Steel Exception: {str(e)}"
+            
+            # PLAN B: Kalau Steel 100% down, guna requests biasa (Fallback)
+            logging.info(f"Steel Down! Falling back to normal requests... Error: {str(e)[:50]}")
+            try:
+                resp = python_session.get(url, timeout=15, allow_redirects=True)
+                if resp.status_code == 200 and resp.text:
+                    return resp.text, "OK"
+                else:
+                    return None, f"Failed (HTTP {resp.status_code})"
+            except Exception as req_err:
+                return None, f"Request Fallback Failed: {str(req_err)}"
 
 def detect_payment_processor(html):
     processors = {'authorize': ['authorize.net', 'authorize', 'paymentech', 'cybersource'], 'stripe': ['stripe', 'stripe.js', 'stripe.com', 'v3/stripe'], 'paypal': ['paypal', 'paypal.com']}
