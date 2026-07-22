@@ -218,6 +218,7 @@ def get_form_action_and_payload(session, url, proxy_url):
 def parse_response(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     
+    # Cari sebarang div yang ada class error/status/messages
     status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages|crm-error', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
@@ -228,6 +229,7 @@ def parse_response(html, url):
             if error_text:
                 return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
                 
+    # Cari span class msg-text
     msg_text_span = soup.find('span', class_='msg-text')
     if msg_text_span:
         error_text = msg_text_span.get_text(strip=True)
@@ -237,6 +239,7 @@ def parse_response(html, url):
         if error_text and len(error_text) > 3:
             return {'approved': False, 'has_msg': True, 'message': error_text, 'clean_response': error_text}
 
+    # Cari perkataan declined secara meluas
     all_text = soup.get_text(' ', strip=True)
     if re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)', all_text, re.I):
         match = re.search(r'(submission failed|failed to submit|transaction declined|error on participant|card declined)[^.]*', all_text, re.I)
@@ -393,7 +396,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if confirm_action:
                     confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
 
-                # FORCE URL CONFIRMATION SUPAYA SEMPURNA
                 if '?' in confirm_post_url:
                     if '_qf_Confirm_display=true' not in confirm_post_url:
                         confirm_post_url += '&_qf_Confirm_display=true'
@@ -415,13 +417,11 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if confirm_response.status_code in [301, 302, 303, 307, 308]:
                     redirect_url = confirm_response.headers.get('Location')
                     if redirect_url:
-                        # Pastikan URL redirect itu lengkap
                         if not redirect_url.startswith('http'):
                             redirect_url = urljoin("https://www.saharaaa.org", redirect_url)
                         
                         logging.info(f"URL Redirect Selepas Submit Kedua: {redirect_url}")
                         
-                        # Tukar ke GET request untuk tangkap page result
                         session.headers.update({
                             "Referer": confirm_post_url
                         })
@@ -435,6 +435,10 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                     result = parse_response(confirm_response.text, confirm_response.url)
             else:
                 result = parse_response(response.text, response.url)
+            
+            # Tambah log untuk track error
+            if result.get('has_msg'):
+                logging.info(f"Error dikesan: {result.get('message')}")
             
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
