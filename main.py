@@ -240,7 +240,6 @@ def parse_response(html, url):
         return {'approved': False, 'has_msg': False, 'message': 'Confirmation page', 'clean_response': '', 'is_confirmation': True}
    
     logger.warning("No error div found - stuck on form")
-    # Dump more HTML for debug
     logger.warning(f"FULL RESPONSE SNIPPET (first 3000 chars):\n{html[:3000]}")
     return {'approved': False, 'has_msg': False, 'message': 'Form Incomplete / Stuck on Initial Page', 'clean_response': 'Stuck on Initial'}
 
@@ -413,12 +412,11 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 "Upgrade-Insecure-Requests": "1"
             })
             
-            response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
+            response = session.post(form_action, data=clean_initial, timeout=30, allow_redirects=True)
             logger.info(f"POST Response Status: {response.status_code} | URL: {response.url}")
             
-            # Dump response if stuck
             if not '_qf_Confirm' in response.url and not '_qf_ThankYou' in response.url:
-                logger.warning(f"STUCK RESPONSE SNIPPET:\n{response.text[:2500]}")
+                logger.warning(f"STUCK RESPONSE SNIPPET (first 3000 chars):\n{response.text[:3000]}")
             
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
@@ -434,7 +432,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                     for k, v in confirm_hidden.items():
                         merged_payload[k] = v
                 clean_confirm = build_clean_payload(merged_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_url, is_confirm=True)
-                confirm_response = session.post(form_action, data=clean_confirm, timeout=25, allow_redirects=True)
+                confirm_response = session.post(form_action, data=clean_confirm, timeout=30, allow_redirects=True)
                
                 result = parse_response(confirm_response.text, confirm_response.url)
             else:
