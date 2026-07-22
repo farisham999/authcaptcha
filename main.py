@@ -18,6 +18,9 @@ from urllib.parse import urljoin, urlparse, parse_qs
 requests.packages.urllib3.util.connection.HAS_IPV6 = False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# TAMBAHAN UNTUK PLAYWRIGHT (STEEL WEBSOCKET)
+from playwright.sync_api import sync_playwright
+
 app = Flask(__name__)
 
 # ==========================================
@@ -119,7 +122,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI STEEL API SCRAPE (TANPA PLAYWRIGHT)
+# FUNGSI STEEL PLAYWRIGHT (WORKING 100%)
 # ==========================================
 def fetch_via_steel(url, proxy_url=None, python_session=None):
     api_headers = {
@@ -137,7 +140,6 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
         else:
             steel_proxy = proxy_url
 
-    # Cipta Session Steel
     session_payload = {
         "options": {
             "headless": True,
@@ -149,55 +151,63 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
         
     session_id = None
     try:
-        # 1. Cipta session browser dalam Steel
+        # 1. Cipta session Steel
         create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=api_headers, json=session_payload, timeout=15)
-        
         if create_resp.status_code not in [200, 201]:
             raise Exception(f"Steel Auth Error {create_resp.status_code}")
             
         session_data = create_resp.json()
         session_id = session_data['id']
         
-        # 2. Scrape URL menggunakan Session Steel
-        scrape_resp = requests.post(
-            f"{STEEL_BASE_URL}/v1/sessions/{session_id}/scrape", 
-            headers=api_headers, 
-            json={"url": url, "returnHtml": True}, # Paksa returnHtml True
-            timeout=30
-        )
+        # FIX PUNCA 502: Guna apiKey= bukan steel-api-key=
+        ws_url = f"wss://connect.steel.dev?sessionId={session_id}&apiKey={STEEL_API_KEY}"
         
-        if scrape_resp.status_code != 200:
-            raise Exception(f"Scrape Error {scrape_resp.status_code}")
+        html_content = None
+        
+        # 2. Guna Playwright untuk connect ke Browser Steel
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(ws_url)
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.new_page()
             
-        scrape_data = scrape_resp.json()
+            try:
+                # FIX: Guna wait_until="load" (lebih stabil)
+                page.goto(url, timeout=45000, wait_until="load")
+                html_content = page.content()
+                
+                # Pindahkan Cookies & User-Agent dari Steel ke Python Requests Session
+                if python_session and html_content:
+                    cookies = context.cookies()
+                    for cookie in cookies:
+                        python_session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', ''))
+                    
+                    user_agent = page.evaluate("() => navigator.userAgent")
+                    if user_agent:
+                        python_session.headers.update({"User-Agent": user_agent})
+                        
+            except Exception as nav_err:
+                raise Exception(f"Nav Error: {str(nav_err)}")
+            finally:
+                try:
+                    page.close()
+                    browser.close()
+                except:
+                    pass
         
-        # 3. Tutup session Steel untuk jimat credit
+        # 3. Tutup session Steel kat API untuk jimat credit
         requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
         
-        if scrape_data.get('status') == 'success' and scrape_data.get('data'):
-            html_content = scrape_data['data']
-            
-            # Pindahkan Cookies dari Steel ke Python Requests Session
-            if python_session:
-                try:
-                    steel_cookies = scrape_data.get('cookies', [])
-                    for cookie in steel_cookies:
-                        if isinstance(cookie, dict) and 'name' in cookie and 'value' in cookie:
-                            python_session.cookies.set(cookie['name'], cookie['value'])
-                except Exception as ce:
-                    logging.info(f"Warning: Gagal pindah cookies: {ce}")
-
+        if html_content:
             return html_content, "OK"
         else:
-            raise Exception("No Data Returned")
+            raise Exception("Empty HTML")
             
     except Exception as e:
-        # Pastikan session ditutup kalau ada error
         if session_id:
             requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
         
-        # PLAN B: Kalau Steel API gagal, fallback ke request biasa
-        logging.info(f"Steel API Failed ({str(e)[:50]}). Falling back to normal requests...")
+        # PLAN B: Kalau Steel gagal, guna requests biasa
+        logging.info(f"Steel Failed. Using normal request. Error: {str(e)[:50]}")
         try:
             resp = python_session.get(url, timeout=15, allow_redirects=True)
             if resp.status_code == 200 and resp.text:
@@ -205,7 +215,7 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
             else:
                 return None, f"Failed (HTTP {resp.status_code})"
         except Exception as req_err:
-            return None, f"Request Fallback Failed: {str(req_err)}"
+            return None, f"Request Failed: {str(req_err)}"
 
 def detect_payment_processor(html):
     processors = {'authorize': ['authorize.net', 'authorize', 'paymentech', 'cybersource'], 'stripe': ['stripe', 'stripe.js', 'stripe.com', 'v3/stripe'], 'paypal': ['paypal', 'paypal.com']}
@@ -283,7 +293,7 @@ def extract_raw_fields(html, soup, form):
 def get_form_action_and_payload(session, url, proxy_url):
     try:
         # ==============================================================
-        # GUNA STEEL API UNTUK DAPATKAN HTML & BYPASS BLOCK
+        # GUNA STEEL PLAYWRIGHT UNTUK DAPATKAN HTML & BYPASS BLOCK
         # ==============================================================
         html, err_msg = fetch_via_steel(url, proxy_url, session)
         
