@@ -54,16 +54,10 @@ def generate_random_user_data():
     email_prefix = f"{first_name.lower()}{random.randint(1000,9999)}"
     email = f"{email_prefix}@{random.choice(email_domains)}"
     
-    city_state_zip = [
-        ("Portland", "1041", "97201"),
-        ("Seattle", "1051", "98101"),
-        ("Denver", "1005", "80205"),
-        ("Phoenix", "1002", "85001"),
-        ("Austin", "1048", "78701"),
-        ("Boston", "1020", "02108"),
-        ("Chicago", "1012", "60601")
-    ]
-    city, state_id, postal_code = random.choice(city_state_zip)
+    # FIX: Kunci lokasi Minneapolis, Minnesota, 55401 supaya match dengan Country US (1228)
+    city = "Minneapolis"
+    state_id = "1022" 
+    postal_code = "55401"
     street_address = f"{random.randint(100, 9999)} Main St"
     phone = f"612-{random.randint(200,999)}-{random.randint(1000,9999)}"
     
@@ -312,7 +306,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
     final_payload["billing_street_address-5"] = user_data['street_address']
     final_payload["billing_city-5"] = user_data['city']
     final_payload["billing_country_id-5"] = "1228"
-    final_payload["billing_state_province_id-5"] = user_data['state_id']
+    final_payload["billing_state_province_id-5"] = user_data['state_id'] # Dapat 1022 dari generate_random_user_data
     final_payload["billing_postal_code-5"] = user_data['postal_code']
     final_payload["_qf_Main_upload"] = "1"
 
