@@ -258,6 +258,9 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     if '_detected_payment_processor_id' in raw_payload:
         final_payload['payment_processor_id'] = raw_payload['_detected_payment_processor_id'].get('value', '4')
     
+    # FORCE NON-RECURRING
+    final_payload['is_recur'] = "0"
+    
     price_selected = False
     for key, field_info in raw_payload.items():
         if key in ['_detected_payment_processor_id', '_submit_button_name', '_submit_button_value']: continue
@@ -275,6 +278,18 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             continue
         if key == 'selectProduct':
             final_payload[key] = current_value if current_value else "1"
+            continue
+
+        # Recurring fields - force off
+        if 'frequency' in key_lower or 'installments' in key_lower or 'recur' in key_lower:
+            if key == 'frequency_interval':
+                final_payload[key] = "1"
+            elif key == 'frequency_unit':
+                final_payload[key] = "month"
+            elif key == 'installments':
+                final_payload[key] = "0"
+            else:
+                final_payload[key] = "0"
             continue
 
         if 'card' in key_lower and ('number' in key_lower or 'no' in key_lower or 'num' in key_lower): 
@@ -316,7 +331,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
             else:
                 final_payload[key] = "0"
         else:
-            if current_value:
+            if current_value not in [None, '']:
                 final_payload[key] = current_value
 
     return final_payload
