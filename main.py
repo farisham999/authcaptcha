@@ -294,7 +294,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
 
     if is_confirm:
         final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
-        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&amp;id=1"
+        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
         final_payload["email_work"] = ""
         final_payload["_qf_default"] = "Confirm:next"
         final_payload["custom_1"] = full_year
@@ -302,7 +302,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
         final_payload["_qf_Confirm_next"] = "1"
     else:
         final_payload["qfKey"] = qfkey
-        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&amp;id=1"
+        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
         final_payload["hidden_processor"] = "1"
         final_payload["payment_processor_id"] = "4"
         final_payload["priceSetId"] = "3"
