@@ -122,7 +122,7 @@ def create_session(proxy_url=None):
     return session
 
 # ==========================================
-# FUNGSI STEEL PLAYWRIGHT (WEBSOCKET ANTI BLOCK)
+# FUNGSI STEEL PLAYWRIGHT (AUTO RETRY & NETWORK IDLE)
 # ==========================================
 def fetch_via_steel(url, proxy_url=None, python_session=None):
     api_headers = {
@@ -149,64 +149,72 @@ def fetch_via_steel(url, proxy_url=None, python_session=None):
     if steel_proxy:
         session_payload["options"]["proxy"] = steel_proxy
         
-    try:
-        # 1. Cipta session Steel
-        create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=api_headers, json=session_payload, timeout=15)
-        if create_resp.status_code not in [200, 201]:
-            return None, f"Steel Auth Error (Code {create_resp.status_code})"
-            
-        session_data = create_resp.json()
-        session_id = session_data['id']
-        ws_url = f"wss://connect.steel.dev?sessionId={session_id}&steel-api-key={STEEL_API_KEY}"
-        
-        html_content = None
-        
-        # 2. Guna Playwright untuk connect ke Browser Steel
-        with sync_playwright() as p:
-            # Connect ke browser hantu Steel
-            browser = p.chromium.connect_over_cdp(ws_url)
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-            page = context.new_page()
-            
-            try:
-                # Pergi ke URL target (Steel akan auto bypass Cloudflare kat sini)
-                page.goto(url, timeout=45000, wait_until="domcontentloaded")
+    max_retries = 3
+    for attempt in range(max_retries):
+        session_id = None
+        try:
+            # 1. Cipta session Steel
+            create_resp = requests.post(f"{STEEL_BASE_URL}/v1/sessions", headers=api_headers, json=session_payload, timeout=15)
+            if create_resp.status_code not in [200, 201]:
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                    continue
+                return None, f"Steel Auth Error (Code {create_resp.status_code})"
                 
-                # Dapatkan HTML penuh
-                html_content = page.content()
+            session_data = create_resp.json()
+            session_id = session_data['id']
+            ws_url = f"wss://connect.steel.dev?sessionId={session_id}&steel-api-key={STEEL_API_KEY}"
+            
+            html_content = None
+            
+            # 2. Guna Playwright untuk connect ke Browser Steel
+            with sync_playwright() as p:
+                browser = p.chromium.connect_over_cdp(ws_url)
+                context = browser.contexts[0] if browser.contexts else browser.new_context()
+                page = context.new_page()
                 
-                # Pindahkan Cookies dari Steel ke Python Requests Session
-                if python_session:
-                    cookies = context.cookies()
-                    for cookie in cookies:
-                        # Pastikan format cookie tu betul untuk requests
-                        python_session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', ''))
+                try:
+                    # Guna networkidle supaya dia tunggu cloudflare selesai load
+                    page.goto(url, timeout=45000, wait_until="networkidle")
+                    html_content = page.content()
                     
-                    # Pindahkan User-Agent sekali supaya sama
-                    user_agent = page.evaluate("() => navigator.userAgent")
-                    if user_agent:
-                        python_session.headers.update({"User-Agent": user_agent})
+                    # Pindahkan Cookies dari Steel ke Python Requests Session
+                    if python_session:
+                        cookies = context.cookies()
+                        for cookie in cookies:
+                            python_session.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', ''))
                         
-            except Exception as nav_err:
-                return None, f"Steel Nav Error: {str(nav_err)}"
-            finally:
-                # Tutup page & browser (release resource)
-                page.close()
-                browser.close()
-        
-        # 3. Tutup session Steel kat API untuk jimat credit
-        requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
-        
-        if html_content:
-            return html_content, "OK"
-        else:
-            return None, "Steel Scrape Failed (Empty HTML)"
+                        user_agent = page.evaluate("() => navigator.userAgent")
+                        if user_agent:
+                            python_session.headers.update({"User-Agent": user_agent})
+                            
+                except Exception as nav_err:
+                    if attempt < max_retries - 1:
+                        time.sleep(3)
+                        continue
+                    return None, f"Steel Nav Error: {str(nav_err)}"
+                finally:
+                    page.close()
+                    browser.close()
             
-    except Exception as e:
-        # Pastikan session ditutup kalau ada error
-        if 'session_id' in locals():
+            # 3. Tutup session Steel kat API untuk jimat credit
             requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
-        return None, f"Steel Exception: {str(e)}"
+            
+            if html_content:
+                return html_content, "OK"
+            else:
+                return None, "Steel Scrape Failed (Empty HTML)"
+                
+        except Exception as e:
+            if 'session_id' in locals():
+                requests.delete(f"{STEEL_BASE_URL}/v1/sessions/{session_id}", headers=api_headers)
+            
+            if attempt < max_retries - 1:
+                logging.info(f"Steel 502 Error, retrying in 3s... ({attempt+1}/{max_retries})")
+                time.sleep(3)
+                continue
+                
+            return None, f"Steel Exception: {str(e)}"
 
 def detect_payment_processor(html):
     processors = {'authorize': ['authorize.net', 'authorize', 'paymentech', 'cybersource'], 'stripe': ['stripe', 'stripe.js', 'stripe.com', 'v3/stripe'], 'paypal': ['paypal', 'paypal.com']}
