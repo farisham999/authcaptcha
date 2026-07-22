@@ -25,7 +25,7 @@ app = Flask(__name__)
 # KONFIGURASI STEEL DEV (TUKAR KEPADA API KEY ANDA)
 # ==========================================
 STEEL_API_KEY = "ste-NTvZbMDWUT6NtZKtRxMZDPnCFk56Eu5eT7y03zn4nRTkm0ebEXC9dGHTE9GwCpa6GHP1BclG5SIuPYBsrqUoQiPdRHLmFltzLw5"
-STEEL_BASE_URL = "https://api.steel.dev/v1"
+STEEL_BASE_URL = "https://api.steel.dev"
 
 class Colors:
     HEADER = '\033[95m'
